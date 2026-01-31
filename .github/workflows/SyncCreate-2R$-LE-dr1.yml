@@ -221,7 +221,56 @@ jobs:
 
 
 
-  print_trigger_message: # echos the input message identifying source of workflow trigger (manual via WebUI or automated external cronjob service)
+  convert_and_generate:
+    name: Job 2 - Python Conversion
+    needs: download_playlists
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Branch
+        uses: [actions/checkout@v4](https://github.com)
+        with:
+          ref: 'source'
+
+      - name: Run Conversion and Timestamp Sync
+        run: |
+          # Loop through all JSONs in the target directories
+          find . -name "*.json" | while read -r json_path; do
+            m3u_output="${json_path%.json}.m3u"
+            
+            # Python Template call
+            if [ -f "scripts/convert.py" ]; then
+              echo "Processing Conversion: $json_path"
+              python3 scripts/convert.py "$json_path"
+              
+              # Retrieve original IST from Job 1's meta file
+              orig_ist=$(grep "$json_path" remote_timestamps.meta | cut -d'|' -f2 | xargs)
+              
+              if [ -f "$m3u_output" ] && [ ! -z "$orig_ist" ]; then
+                # Re-parse IST for touch command
+                clean_date=$(echo "$orig_ist" | sed 's/ IST//' | awk -F'-' '{print $3"-"$2"-"$1}')
+                clean_time=$(echo "$orig_ist" | awk '{print $2}')
+                touch -d "$clean_date $clean_time" "$m3u_output"
+                
+                # Metrics
+                m_size=$(du -h "$m3u_output" | cut -f1)
+                m_ext=$(grep -c "#EXTINF" "$m3u_output" || echo "0")
+                echo "✅ Generated $m3u_output [$m_size | $m_ext entries] Synced to: $orig_ist"
+              fi
+            fi
+          done
+
+      - name: Final Commit and Push
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -m "Auto-generate m3u from json - $(date '+%d-%m-%Y %H:%M IST')" || echo "No changes"
+          git push origin source
+
+
+
+  echo_input_message: # echos the input message identifying source of workflow trigger (manual via WebUI or automated external cronjob service)
+    name: Echo Input Message
     runs-on: ubuntu-latest
     steps:
       - name: Print Trigger Message
