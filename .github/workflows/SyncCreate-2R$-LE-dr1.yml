@@ -1,4 +1,4 @@
-name: SyncCreate 2R $ LE dr1
+tname: SyncCreate 2R $ LE dr1
 
 on: 
   workflow_dispatch: # allows manual workflow run from the Actions tab (workflow must be in default branch to work)
@@ -221,9 +221,9 @@ jobs:
 
 
 
-  convert_and_generate:
-    name: Job 2 - Python Conversion
-    needs: download_playlists
+  generate_m3u_from_json:
+    name: Generate M3U Playlists from JSON
+    needs: download_files
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Source Branch
