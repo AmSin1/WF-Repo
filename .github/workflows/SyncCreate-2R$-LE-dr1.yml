@@ -24,13 +24,14 @@ jobs:
   download_files: # copies specified playlists from source repos and overwrites corresponding specified playlists in destination branch/directories in destination repo
     name: Download M3U Playlists & JSONs
     runs-on: ubuntu-latest
+    continue-on-error: true # ensures job continues even if it faces issues
     permissions:
       contents: write # grants permissions for the job to write to contents
     steps:
       - name: Validate and Load JSON Config from Repo Secrets
         shell: bash
         env:
-          CONFIG_JSON: ${{ secrets.ENV_VARIABLES_LE }}
+          CONFIG_JSON: ${{ secrets.ENV_DOWNLOAD_LE }}
         run: |
           # Step 1: Validate JSON syntax
           if ! echo "$CONFIG_JSON" | jq empty; then
@@ -221,11 +222,12 @@ jobs:
 
 
 
-  generate_m3u_from_json:
+  convert_json:
     name: Generate M3U Playlists from JSON
-    needs: download_files
+    needs: download_files # dependency - this job starts only after the referenced job completes/commits
     if: always() # this job runs regardless of other jobs' success/failure status
     runs-on: ubuntu-latest
+    continue-on-error: true # prevents one conversion error from failing the whole workflow
     permissions:
       contents: write # grants permissions for the job to write to contents
     steps:
@@ -259,85 +261,17 @@ jobs:
           persist-credentials: false # REQUIRED if upstream repo is private (see wiki)
           path: 'download-branch'
 
-      - name: Download Metadata Artifact
-        # Retrieves the .meta file created in Job 1 to access remote timestamps
+      - name: Download Artifact with Remote Timestamps Metadata
         uses: actions/download-artifact@v4
         with:
-          name: playlist-metadata
-          path: . 
+          name: playlist-metadata 
+          path: ${{ github.workspace }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Process Conversions & Route to M3U Folders
-        run: |
-          cd download-branch
-          
-          # Step 1: Find all JSON files in the 'json' subdirectories
-          find . -path "*/json/*.json" | while read -r JSON_PATH; do
-            # Extract directory and filename info
-            BASE_DIR=$(dirname "$JSON_PATH")   # e.g., sl-le/json
-            JSON_FILE=$(basename "$JSON_PATH") # e.g., sl-le-4.json
-            
-            # Step 2: Target the 'm3u' subfolder instead of 'json'
-            M3U_DIR=$(echo "$BASE_DIR" | sed 's|/json|/m3u|')
-            M3U_FILE="${JSON_FILE%.json}.m3u"
-            TARGET_M3U="$M3U_DIR/$M3U_FILE"
-            
-            mkdir -p "$M3U_DIR" # Create target m3u folder if missing
-            
-            echo "------------------------------------------------------------"
-            echo "CONVERTING: $JSON_PATH -> $TARGET_M3U"
-
-            # Step 3: Run Python Conversion
-            # Logic: Input path and Output path passed as arguments
-            if [ -f "scripts/convert.py" ]; then
-              python3 scripts/convert.py "$JSON_PATH" "$TARGET_M3U"
-            else
-              echo "SKIP: scripts/convert.py not found."
-              continue
-            fi
-
-            # Step 4: Timestamp Sync using Job 1 Metadata
-            # Matches the filename in the pipe-separated meta file to get the 5th column
-            ORIG_IST=$(grep "|$JSON_FILE|" ../remote_timestamps.meta | cut -d'|' -f5 || echo "")
-
-            if [ -f "$TARGET_M3U" ] && [ -n "$ORIG_IST" ]; then
-              # Re-format IST <DD-MM-YYYY HH:MM IST> to ISO for the 'touch' command
-              CLEAN_DATE=$(echo "$ORIG_IST" | awk '{print $1}' | awk -F'-' '{print $3"-"$2"-"$1}')
-              CLEAN_TIME=$(echo "$ORIG_IST" | awk '{print $2}')
-              
-              # Set the generated M3U's date to match the source JSON's remote date
-              touch -d "$CLEAN_DATE $CLEAN_TIME" "$TARGET_M3U"
-              
-              # Metrics for current conversion
-              SIZE=$(stat -c%s "$TARGET_M3U")
-              EXT_COUNT=$(grep -c '#EXTINF' "$TARGET_M3U" || echo "0")
-              echo "SUCCESS: $M3U_FILE | $SIZE bytes | $EXT_COUNT #EXTINF"
-              echo "SYNC: Timestamp set to $ORIG_IST"
-            fi
-          done
-
-      - name: Commit and Push Generated Playlists
-        run: |
-          cd download-branch
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          
-          # Authenticate using the PAT and Repo variables loaded from secrets
-          git remote set-url origin https://x-access-token:${{ secrets.PAT_FG }}@://github.com{{ env.DOWNLOAD_REPO }}.git
-          
-          git add . 
-          
-          if git diff --cached --quiet; then
-            echo "RESULT: No changes in generated playlists. Skipping push."
-          else
-            git commit -m "Automated conversion: JSON to M3U [Synced Timestamps]"
-            git push origin ${{ env.DOWNLOAD_BRANCH }}
-            echo "RESULT: Successfully pushed generated M3U files."
-          fi
 
 
 
