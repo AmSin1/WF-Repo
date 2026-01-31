@@ -224,48 +224,120 @@ jobs:
   generate_m3u_from_json:
     name: Generate M3U Playlists from JSON
     needs: download_files
+    if: always() # this job runs regardless of other jobs' success/failure status
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # grants permissions for the job to write to contents
     steps:
-      - name: Checkout Source Branch
-        uses: [actions/checkout@v4](https://github.com)
-        with:
-          ref: 'source'
-
-      - name: Run Conversion and Timestamp Sync
+      - name: Validate and Load JSON Config from Repo Secrets
+        shell: bash
+        env:
+          CONFIG_JSON: ${{ secrets.ENV_VARIABLES_LE }}
         run: |
-          # Loop through all JSONs in the target directories
-          find . -name "*.json" | while read -r json_path; do
-            m3u_output="${json_path%.json}.m3u"
+          # Step 1: Validate JSON syntax
+          if ! echo "$CONFIG_JSON" | jq empty; then
+            echo "ERROR: INVALID JSON detected in repo secret! Check syntax for missing brackets or trailing commas."
+            exit 1
+          fi          
+          
+          # Step 2: Export JSON keys/values to GitHub environment
+          echo "$CONFIG_JSON" | jq -r 'to_entries[] | "\(.key)=\(.value)"' >> $GITHUB_ENV # extracts all keys and values and writes them to the global $GITHUB_ENV
+          
+          # Step 3: Mask individual variables for public log security
+          echo "$CONFIG_JSON" | jq -r '.[]' | while read -r value; do
+            [ -n "$value" ] && echo "::add-mask::$value" # ensures that even after parsing, individual parsed variables are masked as '***' in logs
+          done
+          echo "SUCCESS: JSON configuration validated and loaded into GitHub environment."
+
+      - name: Checkout Destination Branch in Download Repo
+        uses: actions/checkout@v4
+        with:
+          repository: '${{ env.DOWNLOAD_REPO }}' # specify 'owner/repo' of the destination repo
+          ref: ${{ env.DOWNLOAD_BRANCH }}  # set the destination branch to checkout
+          token: ${{ secrets.PAT_FG }}
+          fetch-depth: 0 # get full history to allow rebasing (recommended for every job that needs to commit and push back)
+          persist-credentials: false # REQUIRED if upstream repo is private (see wiki)
+          path: 'download-branch'
+
+      - name: Download Metadata Artifact
+        # Retrieves the .meta file created in Job 1 to access remote timestamps
+        uses: actions/download-artifact@v4
+        with:
+          name: playlist-metadata
+          path: . 
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Process Conversions & Route to M3U Folders
+        run: |
+          cd download-branch
+          
+          # Step 1: Find all JSON files in the 'json' subdirectories
+          find . -path "*/json/*.json" | while read -r JSON_PATH; do
+            # Extract directory and filename info
+            BASE_DIR=$(dirname "$JSON_PATH")   # e.g., sl-le/json
+            JSON_FILE=$(basename "$JSON_PATH") # e.g., sl-le-4.json
             
-            # Python Template call
+            # Step 2: Target the 'm3u' subfolder instead of 'json'
+            M3U_DIR=$(echo "$BASE_DIR" | sed 's|/json|/m3u|')
+            M3U_FILE="${JSON_FILE%.json}.m3u"
+            TARGET_M3U="$M3U_DIR/$M3U_FILE"
+            
+            mkdir -p "$M3U_DIR" # Create target m3u folder if missing
+            
+            echo "------------------------------------------------------------"
+            echo "CONVERTING: $JSON_PATH -> $TARGET_M3U"
+
+            # Step 3: Run Python Conversion
+            # Logic: Input path and Output path passed as arguments
             if [ -f "scripts/convert.py" ]; then
-              echo "Processing Conversion: $json_path"
-              python3 scripts/convert.py "$json_path"
+              python3 scripts/convert.py "$JSON_PATH" "$TARGET_M3U"
+            else
+              echo "SKIP: scripts/convert.py not found."
+              continue
+            fi
+
+            # Step 4: Timestamp Sync using Job 1 Metadata
+            # Matches the filename in the pipe-separated meta file to get the 5th column
+            ORIG_IST=$(grep "|$JSON_FILE|" ../remote_timestamps.meta | cut -d'|' -f5 || echo "")
+
+            if [ -f "$TARGET_M3U" ] && [ -n "$ORIG_IST" ]; then
+              # Re-format IST <DD-MM-YYYY HH:MM IST> to ISO for the 'touch' command
+              CLEAN_DATE=$(echo "$ORIG_IST" | awk '{print $1}' | awk -F'-' '{print $3"-"$2"-"$1}')
+              CLEAN_TIME=$(echo "$ORIG_IST" | awk '{print $2}')
               
-              # Retrieve original IST from Job 1's meta file
-              orig_ist=$(grep "$json_path" remote_timestamps.meta | cut -d'|' -f2 | xargs)
+              # Set the generated M3U's date to match the source JSON's remote date
+              touch -d "$CLEAN_DATE $CLEAN_TIME" "$TARGET_M3U"
               
-              if [ -f "$m3u_output" ] && [ ! -z "$orig_ist" ]; then
-                # Re-parse IST for touch command
-                clean_date=$(echo "$orig_ist" | sed 's/ IST//' | awk -F'-' '{print $3"-"$2"-"$1}')
-                clean_time=$(echo "$orig_ist" | awk '{print $2}')
-                touch -d "$clean_date $clean_time" "$m3u_output"
-                
-                # Metrics
-                m_size=$(du -h "$m3u_output" | cut -f1)
-                m_ext=$(grep -c "#EXTINF" "$m3u_output" || echo "0")
-                echo "✅ Generated $m3u_output [$m_size | $m_ext entries] Synced to: $orig_ist"
-              fi
+              # Metrics for current conversion
+              SIZE=$(stat -c%s "$TARGET_M3U")
+              EXT_COUNT=$(grep -c '#EXTINF' "$TARGET_M3U" || echo "0")
+              echo "SUCCESS: $M3U_FILE | $SIZE bytes | $EXT_COUNT #EXTINF"
+              echo "SYNC: Timestamp set to $ORIG_IST"
             fi
           done
 
-      - name: Final Commit and Push
+      - name: Commit and Push Generated Playlists
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add .
-          git commit -m "Auto-generate m3u from json - $(date '+%d-%m-%Y %H:%M IST')" || echo "No changes"
-          git push origin source
+          cd download-branch
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Authenticate using the PAT and Repo variables loaded from secrets
+          git remote set-url origin https://x-access-token:${{ secrets.PAT_FG }}@://github.com{{ env.DOWNLOAD_REPO }}.git
+          
+          git add . 
+          
+          if git diff --cached --quiet; then
+            echo "RESULT: No changes in generated playlists. Skipping push."
+          else
+            git commit -m "Automated conversion: JSON to M3U [Synced Timestamps]"
+            git push origin ${{ env.DOWNLOAD_BRANCH }}
+            echo "RESULT: Successfully pushed generated M3U files."
+          fi
 
 
 
