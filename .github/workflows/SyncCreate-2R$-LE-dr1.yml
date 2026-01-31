@@ -272,6 +272,98 @@ jobs:
         with:
           python-version: '3.10'
 
+      - name: Convert JSON to M3U Playlists
+        shell: bash
+        run: |
+          cd download-branch || { echo "FAILURE: Could not enter download-branch directory."; exit 0; }
+          
+          # Step 1: Identify Active Groups from Job 1 metadata
+          # Logic: Get parent folder name by stripping the /json or /m3u suffix from meta file entries
+          ACTIVE_GROUPS=$(cut -d'|' -f1 ../remote_timestamps.meta 2>/dev/null | sed 's|\(.*\)/.*|\1|' | sort -u || echo "")
+
+          # Step 2: Loop through each active parent folder
+          for GROUP in $ACTIVE_GROUPS; do
+            JSON_DIR="$GROUP/json"
+            [ ! -d "$JSON_DIR" ] && continue # Skip if this specific folder doesn't have a 'json' subfolder
+
+            echo "------------------------------------------------------------------------------------------------------------------------"
+            echo "GROUP PROCESSING: $GROUP"
+            
+            # Step 3: Find all JSON files (pre-existing and new) in the current group
+            find "$JSON_DIR" -name "*.json" | while read -r JSON_PATH; do
+              JSON_FILE=$(basename "$JSON_PATH")
+              FILE_ID="${JSON_FILE%.json}"
+              
+              # Step 4: Map JSON file to its specific unique script (e.g., scripts/sl-le-4.py)
+              SPECIFIC_SCRIPT="scripts/${FILE_ID}.py"
+              M3U_DIR="$GROUP/m3u"
+              TARGET_M3U="$M3U_DIR/${FILE_ID}.m3u"
+              mkdir -p "$M3U_DIR" # Ensure target m3u folder exists
+
+              if [ -f "$SPECIFIC_SCRIPT" ]; then
+                # Step 5: Execute Python Conversion with Argument Passthrough
+                # Logic: We use '||' to catch crashes and print a Failure metric echo immediately
+                if python3 "$SPECIFIC_SCRIPT" "$JSON_PATH" "$TARGET_M3U"; then
+                  
+                  # Step 6: Sync Timestamps (Remote Metadata vs. Local Fallback)
+                  ORIG_IST=$(grep "|$JSON_FILE|" ../remote_timestamps.meta | cut -d'|' -f5 || echo "")
+                  
+                  if [ -f "$TARGET_M3U" ]; then
+                    if [ -n "$ORIG_IST" ]; then
+                      # Convert <DD-MM-YYYY HH:MM IST> back to ISO for the 'touch' command
+                      CLEAN_DATE=$(echo "$ORIG_IST" | awk '{print $1}' | awk -F'-' '{print $3"-"$2"-"$1}')
+                      CLEAN_TIME=$(echo "$ORIG_IST" | awk '{print $2}')
+                      touch -d "$CLEAN_DATE $CLEAN_TIME" "$TARGET_M3U" || true
+                      MOD_TIME="$ORIG_IST"
+                      TIME_NOTE="([✓]metadata synced)"
+                    else
+                      # If JSON was pre-existing, sync M3U to JSON's local modification time
+                      touch -r "$JSON_PATH" "$TARGET_M3U" || true
+                      MOD_TIME=$(date -r "$TARGET_M3U" "+%d-%m-%Y %H:%M IST")
+                      TIME_NOTE="([✓]json-local synced)"
+                    fi
+                    
+                    # Step 7: Success Echo with metrics (Job 1 Style)
+                    SIZE=$(stat -c%s "$TARGET_M3U")
+                    COUNT=$(grep -c '#EXTINF' "$TARGET_M3U" || echo "0")
+                    echo "$M3U_FILE conversion : SUCCESS. Last updated $MOD_TIME $TIME_NOTE. $SIZE bytes, $COUNT #EXTINF lines."
+                  else
+                    # Failure Echo if script finished but file is missing
+                    echo "$M3U_FILE conversion : FAILED (Output file missing). 0 bytes, 0 #EXTINF lines."
+                  fi
+                else
+                  # Failure Echo if Python script itself crashed
+                  echo "$M3U_FILE conversion : FAILED (Script error). 0 bytes, 0 #EXTINF lines."
+                fi
+              else
+                # Failure Echo if no matching script was found for the JSON
+                echo "$JSON_FILE conversion : SKIPPED (No script at $SPECIFIC_SCRIPT). 0 bytes, 0 #EXTINF lines."
+              fi
+            done
+          done
+          echo "------------------------------------------------------------------------------------------------------------------------"
+
+      - name: Commit and Push Generated Playlists
+        run: |
+          cd download-branch || exit 0
+          
+          # Step 1: Configure Git using Actions Bot identity
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin https://x-access-token:${{ secrets.PAT_FG }}@://github.com{{ env.DOWNLOAD_REPO }}.git
+          
+          # Step 2: Stage newly generated M3U files
+          git add . 
+          
+          # Step 3: Conditional Push
+          if git diff --cached --quiet; then
+            echo "RESULT: No changes found in generated playlists. Skipping push."
+          else
+            # Only commits and pushes if files have actually changed
+            git commit -m "Automated conversion cycle - $(date '+%d-%m-%Y %H:%M IST')" || echo "No changes to commit."
+            git push origin ${{ env.DOWNLOAD_BRANCH }} || echo "FAILURE: Git push failed. Skipping."
+            echo "RESULT: Successfully committed and pushed generated playlists."
+          fi
 
 
 
