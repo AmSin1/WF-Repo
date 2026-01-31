@@ -221,7 +221,8 @@ jobs:
 
 
 
-  print_trigger_message: # echos the input message identifying source of workflow trigger (manual via WebUI or automated external cronjob service)
+  echo_input_message: # echos the input message identifying source of workflow trigger (manual via WebUI or automated external cronjob service)
+    name: Echo Input Message
     runs-on: ubuntu-latest
     steps:
       - name: Print Trigger Message
