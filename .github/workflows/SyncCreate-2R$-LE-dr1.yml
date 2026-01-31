@@ -168,8 +168,6 @@ jobs:
           done
 
       - name: Commit Changes and Push to Destination Branch
-        env:
-          GITHUB_TOKEN: ${{ secrets.PAT_FG }}   
         run: |
           # Step 1: Enter destination directory
           cd download-branch # changes current working directory to the destination branch    
@@ -177,6 +175,7 @@ jobs:
           # Step 2: Configure git          
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin https://x-access-token:${{ secrets.PAT_FG }}@github.com/${{ env.DOWNLOAD_REPO }}.git # avoids the alternative 'insteadOf' approach to prevent leakage of secret in logs
           
           # Step 3: Analyse downloaded playlists for final summary echos, and stage changed/new files for commit 
           COMMITTED_NAMES=""; COMMITTED_COUNT=0; SKIPPED_NAMES=""; SKIPPED_COUNT=0; SUMMARY_DETAILS=""
