@@ -30,7 +30,7 @@ jobs:
       - name: Validate and Load JSON Config from Repo Secrets
         shell: bash
         env:
-          CONFIG_JSON: ${{ secrets.ENV_VARIABLES_LE }}
+          CONFIG_JSON: ${{ secrets.ENV_DOWNLOAD_LE }}
         run: |
           # Step 1: Validate JSON syntax
           if ! echo "$CONFIG_JSON" | jq empty; then
