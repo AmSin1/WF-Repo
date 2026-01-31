@@ -64,7 +64,7 @@ jobs:
           ${{ env.SOURCE_1a_URL }}|sl-le/m3u|sl-le-1.m3u
           ${{ env.SOURCE_1b_URL }}|sl-le/m3u|sl-le-2.m3u
           ${{ env.SOURCE_1c_URL }}|sl-le/m3u|sl-le-3.m3u
-          ${{ env.SOURCE_1d_URL }}|sl-le/json|sl-le-4.json          
+          ${{ env.SOURCE_1d_URL }}|sl-le/json|sl-le-4.json
           ${{ env.SOURCE_2a_URL }}|fc-le/m3u|fc-le-1.m3u
           ${{ env.SOURCE_2b_URL }}|fc-le/m3u|fc-le-2.m3u
           ${{ env.SOURCE_2c_URL }}|fc-le/m3u|fc-le-3.m3u
