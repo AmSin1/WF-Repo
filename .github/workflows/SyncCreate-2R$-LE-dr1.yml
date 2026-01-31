@@ -1,4 +1,4 @@
-name: SyncCreate 2R $ LE
+name: SyncCreate 2R $ LE dr1
 
 on: 
   workflow_dispatch: # allows manual workflow run from the Actions tab (workflow must be in default branch to work)
@@ -14,15 +14,15 @@ on:
       
 env:
   CRONJOB_SERVICE: "FastCron"
-  DESTINATION_DIR1_PATH: "sl-le"
-  DESTINATION_DIR2_PATH: "fc-le"
+  TZ: 'Asia/Kolkata'
 
 concurrency: # ensures that only one GitHub workflow runs at a time for a specific branch in a repo, prevents conditions where two separate workflow runs attempt to push to same branch simultaneously
   group: sync-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: false # 'false' ensures that a newly-started workflow runs sequentially after and does not terminate a still in-progress workflow run, ensuring that every workflow's changes are eventually pushed
 
 jobs:   
-  download_playlists: # copies specified playlists from source repos and overwrites corresponding specified playlists in destination branch/directories in destination repo
+  download_files: # copies specified playlists from source repos and overwrites corresponding specified playlists in destination branch/directories in destination repo
+    name: Download M3U Playlists & JSONs
     runs-on: ubuntu-latest
     permissions:
       contents: write # grants permissions for the job to write to contents
@@ -52,22 +52,24 @@ jobs:
         with:
           repository: '${{ env.DOWNLOAD_REPO }}' # specify 'owner/repo' of the destination repo
           ref: ${{ env.DOWNLOAD_BRANCH }}  # set the destination branch to checkout
-          token: ${{ secrets.PAT_FG_SYNC }}
+          token: ${{ secrets.PAT_FG }}
           fetch-depth: 0 # get full history to allow rebasing (recommended for every job that needs to commit and push back)
           persist-credentials: false # REQUIRED if upstream repo is private (see wiki)
           path: 'download-branch'
 
-      - name: Download Playlists from Source Repos  
+      - name: Download Playlists from Source URLs 
         run: |
           # Step 1: Define the playlist array
-          LIST=$(cat <<EOF # defines the list of playlists to process in a pipe-separated array (URL|DIR|FILE)
-          ${{ env.SOURCE_PLAYLIST1a_URL }}|${{ env.DESTINATION_DIR1_PATH }}|sl-le-1.m3u
-          ${{ env.SOURCE_PLAYLIST1b_URL }}|${{ env.DESTINATION_DIR1_PATH }}|sl-le-2.m3u
-          ${{ env.SOURCE_PLAYLIST1c_URL }}|${{ env.DESTINATION_DIR1_PATH }}|sl-le-3.m3u
-          ${{ env.SOURCE_PLAYLIST2a_URL }}|${{ env.DESTINATION_DIR2_PATH }}|fc-le-1.m3u
-          ${{ env.SOURCE_PLAYLIST2b_URL }}|${{ env.DESTINATION_DIR2_PATH }}|fc-le-2.m3u
-          ${{ env.SOURCE_PLAYLIST2c_URL }}|${{ env.DESTINATION_DIR2_PATH }}|fc-le-3.m3u
-          ${{ env.SOURCE_PLAYLIST2d_URL }}|${{ env.DESTINATION_DIR2_PATH }}|fc-le-4.m3u
+          LIST=$(cat <<EOF # defines the list of playlists and jsons to process in a pipe-separated array (URL|DIR|FILE)
+          ${{ env.SOURCE_1a_URL }}|sl-le/m3u|sl-le-1.m3u
+          ${{ env.SOURCE_1b_URL }}|sl-le/m3u|sl-le-2.m3u
+          ${{ env.SOURCE_1c_URL }}|sl-le/m3u|sl-le-3.m3u
+          ${{ env.SOURCE_1d_URL }}|sl-le/json|sl-le-4.json          
+          ${{ env.SOURCE_2a_URL }}|fc-le/m3u|fc-le-1.m3u
+          ${{ env.SOURCE_2b_URL }}|fc-le/m3u|fc-le-2.m3u
+          ${{ env.SOURCE_2c_URL }}|fc-le/m3u|fc-le-3.m3u
+          ${{ env.SOURCE_2d_URL }}|fc-le/m3u|fc-le-4.m3u
+          ${{ env.SOURCE_2e_URL }}|fc-le/json|fc-le-5.json
           EOF
           )
 
@@ -101,7 +103,7 @@ jobs:
                 FILE_PATH=$(echo "$URL" | sed -E 's|https://(github.com\|raw.githubusercontent.com)/[^/]+/[^/]+/(blob/\|raw/)?([^/]+/)?(.*)|\4|') # extracts 'path/to/file' to call the GitHub API
                 API_URL="https://api.github.com/repos/${OWNER_REPO}/commits?path=${FILE_PATH}&per_page=1" # sets the URL to target the playlist's commit history
                 REMOTE_DATE=$(curl -s \
-                  -H "Authorization: Bearer ${{ secrets.PAT_FG_SYNC }}" \
+                  -H "Authorization: Bearer ${{ secrets.PAT_FG }}" \
                   -H "X-GitHub-Api-Version: 2022-11-28" \
                   -H "User-Agent: GitHub-Actions-FileSync" \
                   "$API_URL" | jq -r '.[0].commit.committer.date' 2>/dev/null || echo "") # captures the remote commit timestamp by querying GitHub API
@@ -118,9 +120,9 @@ jobs:
               # module: sync remote commit timestamps
               if [ -n "$REMOTE_DATE" ] && [ "$REMOTE_DATE" != "null" ]; then
                 touch -d "$REMOTE_DATE" "$TARGET" # manually syncs the downloaded file's timestamp to match remote commit date
-                MOD_TIME=$(TZ="Asia/Kolkata" date -d "$REMOTE_DATE" "+%d-%m-%Y %H:%M IST") # formats and converts timestamp to IST
+                MOD_TIME=$(date -d "$REMOTE_DATE" "+%d-%m-%Y %H:%M IST") # formats and converts timestamp to IST
               else
-                MOD_TIME=$(TZ="Asia/Kolkata" date -r "$TARGET" "+%d-%m-%Y %H:%M IST") # fallback to downloaded playlist's local commit (workflow run) timestamp in case fetching of remote timestamp via GitHub API or HTTP header fails
+                MOD_TIME=$(date -r "$TARGET" "+%d-%m-%Y %H:%M IST") # fallback to downloaded playlist's local commit (workflow run) timestamp in case fetching of remote timestamp via GitHub API or HTTP header fails
                 TIME_NOTE="([x]download time)" # updates the timestamp tag
               fi
               
@@ -166,6 +168,8 @@ jobs:
           done
 
       - name: Commit Changes and Push to Destination Branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT_FG }}   
         run: |
           # Step 1: Enter destination directory
           cd download-branch # changes current working directory to the destination branch    
@@ -173,7 +177,6 @@ jobs:
           # Step 2: Configure git          
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git remote set-url origin https://x-access-token:${{ secrets.PAT_FG_SYNC }}@github.com/${{ env.DOWNLOAD_REPO }}.git # avoids the alternative 'insteadOf' approach to prevent leakage of secret in logs
           
           # Step 3: Analyse downloaded playlists for final summary echos, and stage changed/new files for commit 
           COMMITTED_NAMES=""; COMMITTED_COUNT=0; SKIPPED_NAMES=""; SKIPPED_COUNT=0; SUMMARY_DETAILS=""
