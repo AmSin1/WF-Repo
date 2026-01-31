@@ -1,0 +1,229 @@
+name: SyncCreate 2R $ LE dr1
+
+on: 
+  workflow_dispatch: # allows manual workflow run from the Actions tab (workflow must be in default branch to work)
+    inputs: # optional input(s) that the cronjob service can pass on to the workflow
+      message:
+        description: 'source trigger of the workflow run'
+        required: true
+        default: 'manual GitHub WebUI trigger' # default message to be printed if workflow is triggered manually via WebUI or if there is no input message alongside a trigger by cronjob service
+        type: string # optionally, specifies type of message
+  # internal scehduled run parameters in the 2 lines below 'commented out' as external cronjob scheduler service is engaged
+  # schedule: # scheduled to run at designated times or every x minutes (minimum interval allowed is 5 minutes)
+    # - cron: '*/22 * * * *'  
+      
+env:
+  CRONJOB_SERVICE: "FastCron"
+  TZ: 'Asia/Kolkata'
+
+concurrency: # ensures that only one GitHub workflow runs at a time for a specific branch in a repo, prevents conditions where two separate workflow runs attempt to push to same branch simultaneously
+  group: sync-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: false # 'false' ensures that a newly-started workflow runs sequentially after and does not terminate a still in-progress workflow run, ensuring that every workflow's changes are eventually pushed
+
+jobs:   
+  download_files: # copies specified playlists from source repos and overwrites corresponding specified playlists in destination branch/directories in destination repo
+    name: Download M3U Playlists & JSONs
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # grants permissions for the job to write to contents
+    steps:
+      - name: Validate and Load JSON Config from Repo Secrets
+        shell: bash
+        env:
+          CONFIG_JSON: ${{ secrets.ENV_VARIABLES_LE }}
+        run: |
+          # Step 1: Validate JSON syntax
+          if ! echo "$CONFIG_JSON" | jq empty; then
+            echo "ERROR: INVALID JSON detected in repo secret! Check syntax for missing brackets or trailing commas."
+            exit 1
+          fi          
+          
+          # Step 2: Export JSON keys/values to GitHub environment
+          echo "$CONFIG_JSON" | jq -r 'to_entries[] | "\(.key)=\(.value)"' >> $GITHUB_ENV # extracts all keys and values and writes them to the global $GITHUB_ENV
+          
+          # Step 3: Mask individual variables for public log security
+          echo "$CONFIG_JSON" | jq -r '.[]' | while read -r value; do
+            [ -n "$value" ] && echo "::add-mask::$value" # ensures that even after parsing, individual parsed variables are masked as '***' in logs
+          done
+          echo "SUCCESS: JSON configuration validated and loaded into GitHub environment."
+      
+      - name: Checkout Destination Branch in Download Repo
+        uses: actions/checkout@v4
+        with:
+          repository: '${{ env.DOWNLOAD_REPO }}' # specify 'owner/repo' of the destination repo
+          ref: ${{ env.DOWNLOAD_BRANCH }}  # set the destination branch to checkout
+          token: ${{ secrets.PAT_FG }}
+          fetch-depth: 0 # get full history to allow rebasing (recommended for every job that needs to commit and push back)
+          persist-credentials: false # REQUIRED if upstream repo is private (see wiki)
+          path: 'download-branch'
+
+      - name: Download Playlists from Source URLs 
+        run: |
+          # Step 1: Define the playlist array
+          LIST=$(cat <<EOF # defines the list of playlists and jsons to process in a pipe-separated array (URL|DIR|FILE)
+          ${{ env.SOURCE_1a_URL }}|sl-le/m3u|sl-le-1.m3u
+          ${{ env.SOURCE_1b_URL }}|sl-le/m3u|sl-le-2.m3u
+          ${{ env.SOURCE_1c_URL }}|sl-le/m3u|sl-le-3.m3u
+          ${{ env.SOURCE_1d_URL }}|sl-le/json|sl-le-4.json
+          ${{ env.SOURCE_2a_URL }}|fc-le/m3u|fc-le-1.m3u
+          ${{ env.SOURCE_2b_URL }}|fc-le/m3u|fc-le-2.m3u
+          ${{ env.SOURCE_2c_URL }}|fc-le/m3u|fc-le-3.m3u
+          ${{ env.SOURCE_2d_URL }}|fc-le/m3u|fc-le-4.m3u
+          ${{ env.SOURCE_2e_URL }}|fc-le/json|fc-le-5.json
+          EOF
+          )
+
+          # Step 2: Initialize the metadata file 
+          METADATA_FILE="${{ github.workspace }}/remote_timestamps.meta" # initializes the metadata file file to record source playlists' latest remote update timestamps
+          touch "$METADATA_FILE" # ensures the initialized file exists
+
+          # Step 3: Download playlists and sync remote timestamps
+          echo "$LIST" | while IFS="|" read -r URL DIR FILE; do # extracts data from the playlist array string using IFS pipe separator
+            [ -z "$URL" ] && continue
+            TARGET="download-branch/$DIR/$FILE" # sets destination file path for each playlist download
+            mkdir -p "download-branch/$DIR" # creates destination directory if it doesn't already exist
+
+            # Sub-step 3a: Download each playlist from source repos
+            CURL_FLAGS="--connect-timeout 3 --retry 3 --retry-delay 1 --retry-max-time 10 --retry-all-errors --no-progress-meter" # optional curl flags
+            HTTP_CODE=$(curl $CURL_FLAGS -R -L --fail \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              -H "User-Agent: FileSync-Batch-2026" \
+              -o "$TARGET" -w "%{http_code}" "$URL" || echo "000") # downloads the playlist using curl and captures the HTTP status code to verify download success
+
+            # Sub-step 3b: Fetch and sync remote commit timestamp, and echo success/failure with key metrics for each download
+            if [ "$HTTP_CODE" = "200" ] && [ -f "$TARGET" ]; then # checks if playlist exists AND was actually downloaded during this specific workflow run
+         
+              # module: fetch remote commit timestamps
+              REMOTE_DATE="" # starts afresh for this iteration
+              TIME_NOTE="(standard download)" # default value
+              if [[ "$URL" == *"github.com"* ]] || [[ "$URL" == *"githubusercontent.com"* ]]; then
+            
+                # sub-module: for downloads from GitHub URLs, capture remote commit timestamps from GitHub API 
+                OWNER_REPO=$(echo "$URL" | sed -E 's|https://(github.com\|raw.githubusercontent.com)/([^/]+/[^/]+).*|\2|') # extracts 'owner/repo' to call the GitHub API
+                FILE_PATH=$(echo "$URL" | sed -E 's|https://(github.com\|raw.githubusercontent.com)/[^/]+/[^/]+/(blob/\|raw/)?([^/]+/)?(.*)|\4|') # extracts 'path/to/file' to call the GitHub API
+                API_URL="https://api.github.com/repos/${OWNER_REPO}/commits?path=${FILE_PATH}&per_page=1" # sets the URL to target the playlist's commit history
+                REMOTE_DATE=$(curl -s \
+                  -H "Authorization: Bearer ${{ secrets.PAT_FG }}" \
+                  -H "X-GitHub-Api-Version: 2022-11-28" \
+                  -H "User-Agent: GitHub-Actions-FileSync" \
+                  "$API_URL" | jq -r '.[0].commit.committer.date' 2>/dev/null || echo "") # captures the remote commit timestamp by querying GitHub API
+                [ -n "$REMOTE_DATE" ] && [ "$REMOTE_DATE" != "null" ] && TIME_NOTE="([✓]API verified)" # updates the timestamp tag
+              else
+                # sub-module: for downloads from non-GitHub URLs, fallback to capturing remote commit timestamps from HTTP header   
+                HEADER_VAL=$(curl -sI "$URL" | grep -i 'Last-Modified:' | cut -d':' -f2- | xargs) # captures the remote commit timestamp from the remote file's header metadata
+                if [ -n "$HEADER_VAL" ]; then
+                  REMOTE_DATE=$(date -d "$HEADER_VAL" -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null)
+                  TIME_NOTE="([✓]header verified)" # updates the timestamp tag
+                fi
+              fi
+              
+              # module: sync remote commit timestamps
+              if [ -n "$REMOTE_DATE" ] && [ "$REMOTE_DATE" != "null" ]; then
+                touch -d "$REMOTE_DATE" "$TARGET" # manually syncs the downloaded file's timestamp to match remote commit date
+                MOD_TIME=$(date -d "$REMOTE_DATE" "+%d-%m-%Y %H:%M IST") # formats and converts timestamp to IST
+              else
+                MOD_TIME=$(date -r "$TARGET" "+%d-%m-%Y %H:%M IST") # fallback to downloaded playlist's local commit (workflow run) timestamp in case fetching of remote timestamp via GitHub API or HTTP header fails
+                TIME_NOTE="([x]download time)" # updates the timestamp tag
+              fi
+              
+              # module: echo success/failure of each downloaded playlist with key metrics
+              SIZE=$(stat -c%s "$TARGET") # calculates file size of downloaded playlist
+              COUNT=$(grep -c '#EXTINF' "$TARGET" || true) # counts number of #EXTINF lines in downloaded playlist
+              echo "$FILE download : SUCCESS. Last updated $MOD_TIME $TIME_NOTE. $SIZE bytes, $COUNT #EXTINF lines."
+              echo "$DIR|$FILE|$SIZE|$COUNT|$MOD_TIME|$TIME_NOTE" >> remote_timestamps.meta # record each playlist's result to metadata fragment (format: DIR|FILE|SIZE|COUNT|TIMESTAMP|TIMENOTE)   
+            else
+              echo "$FILE download : FAILED (HTTP: $HTTP_CODE)"
+              echo "$DIR|$FILE|FAILED|0|N/A|N/A" >> remote_timestamps.meta
+            fi
+            unset MOD_TIME # clears for next iteration
+          done
+
+          # Step 4: Clean up temporary work files       
+          rm -f *.tmp *.temp temp_* # 
+
+      - name: Echo Group-Level Download Results
+        run: |
+          # Step 1: Echo group-level download results
+          DIRS=$(cut -d'|' -f1 remote_timestamps.meta | sort -u) # extract unique directories from the consolidated metadata file
+          echo "------------------------------------------------------------------------------------------------------------------------"
+          for DIR in $DIRS; do
+            S_COUNT=0; T_EXTINF=0; T_SIZE=0; F_COUNT=0; F_NAMES=""
+            
+            # Sub-step 1a: Aggregate group-level download stats for this specific folder
+            while IFS="|" read -r f_dir f_name f_size f_extinf f_time f_note; do
+              if [ "$f_size" = "FAILED" ]; then
+                F_COUNT=$((F_COUNT + 1)) # count of playlists for which download failed 
+                F_NAMES+="$f_name " # names of playlists for which download failed 
+              else
+                S_COUNT=$((S_COUNT + 1)) # count of playlists for which download succeeded
+                T_EXTINF=$((T_EXTINF + f_extinf)) # count of #EXTINF lines in playlists for which download succeeded
+                T_SIZE=$((T_SIZE + f_size)) # total size of playlists for which download succeeded
+              fi
+            done < <(grep "^$DIR|" remote_timestamps.meta)
+            
+            # Sub-step 1b: Echo group-level download results with key metrics
+            echo "RESULT for folder $DIR : successfully downloaded $S_COUNT files ($T_SIZE bytes). Total $T_EXTINF #EXTINF lines present."
+            echo "RESULT for folder $DIR : failed to download $F_COUNT files: ${F_NAMES:-(none)}"
+            echo "------------------------------------------------------------------------------------------------------------------------"
+          done
+
+      - name: Commit Changes and Push to Destination Branch
+        run: |
+          # Step 1: Enter destination directory
+          cd download-branch # changes current working directory to the destination branch    
+
+          # Step 2: Configure git          
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin https://x-access-token:${{ secrets.PAT_FG }}@github.com/${{ env.DOWNLOAD_REPO }}.git # avoids the alternative 'insteadOf' approach to prevent leakage of secret in logs
+          
+          # Step 3: Analyse downloaded playlists for final summary echos, and stage changed/new files for commit 
+          COMMITTED_NAMES=""; COMMITTED_COUNT=0; SKIPPED_NAMES=""; SKIPPED_COUNT=0; SUMMARY_DETAILS=""
+          while IFS="|" read -r DIR FILE SIZE COUNT TIMESTAMP NOTE; do
+            TARGET="$DIR/$FILE"
+            if [ -f "$TARGET" ]; then
+              if [[ -n $(git status --porcelain "$TARGET") ]]; then # uses git status to determine the file state
+                COMMITTED_NAMES+="$FILE " # playlist is changed or new and will be committed; adds to committed list
+                COMMITTED_COUNT=$((COMMITTED_COUNT + 1))
+                SUMMARY_DETAILS+="\n  - $FILE : last updated $TIMESTAMP $NOTE - $SIZE bytes, $COUNT #EXTINF lines"
+                git add "$TARGET" # stages only the changed/new files selectively based on the git status check 
+              else
+                SKIPPED_NAMES+="$FILE " # playlist is identical to the one in the repo and will not be committed; adds to skipped list
+                SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
+                echo "RESULT: No changes found to commit for playlist $FILE."
+              fi
+            fi
+          done < ../remote_timestamps.meta
+
+          # Step 4: Commit changes, push to destination branch and echo final commit summaries  
+          if git diff --cached --quiet; then # checks if there are any changes
+            echo "------------------------------------------------------------------------------------------------------------------------"
+            echo "RESULT: No changes found to commit in any of the $SKIPPED_COUNT playlists. Skipping push."
+          else
+            git commit -m "Automated sync from source" # only commits if a binary or text difference exists, alongwith commit message
+            # git pull origin ${{ env.DOWNLOAD_BRANCH }} --rebase # rebases pull to ensure local is ahead of remote (enable if facing commit/push failures)
+            git push origin ${{ env.DOWNLOAD_BRANCH }} # pushes to the destination branch
+            echo "------------------------------------------------------------------------------------------------------------------------"
+            echo "RESULT: Successfully committed and pushed $COMMITTED_COUNT updated playlist(s)."
+            echo -e "Details: $SUMMARY_DETAILS"
+          fi
+          echo "------------------------------------------------------------------------------------------------------------------------"
+          echo "RESULT: $SKIPPED_COUNT playlist(s) were found unchanged and were skipped: ${SKIPPED_NAMES:-(none)}"
+          echo "------------------------------------------------------------------------------------------------------------------------"
+
+      - name: Upload Artifact with Remote Timestamps Metadata
+        if: always() # ensures metadata is uploaded even if some downloads in the batch fail
+        uses: actions/upload-artifact@v4
+        with:
+          name: playlist-metadata
+          path: ${{ github.workspace }}/remote_timestamps.meta # final source-of-truth for all remote commit timestamps
+          if-no-files-found: error # forces this job to fail if the playlist-metadata file is missing
+
+
+
+  print_trigger_message: # echos the input message identifying source of workflow trigger (manual via WebUI or automated external cronjob service)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print Trigger Message
+        run: |
+          echo "This workflow run was triggered by: ${{ github.event.inputs.message }}"
