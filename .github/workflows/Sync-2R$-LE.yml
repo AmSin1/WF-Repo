@@ -61,15 +61,15 @@ jobs:
         run: |
           # Step 1: Define the playlist array
           LIST=$(cat <<EOF # defines the list of playlists and jsons to process in a pipe-separated array (URL|DIR|FILE)
-          ${{ env.SOURCE_1a_URL }}|sl-le/m3u|sl-le-1.m3u
-          ${{ env.SOURCE_1b_URL }}|sl-le/m3u|sl-le-2.m3u
-          ${{ env.SOURCE_1c_URL }}|sl-le/m3u|sl-le-3.m3u
-          ${{ env.SOURCE_1d_URL }}|sl-le/json|sl-le-4.json
-          ${{ env.SOURCE_2a_URL }}|fc-le/m3u|fc-le-1.m3u
-          ${{ env.SOURCE_2b_URL }}|fc-le/m3u|fc-le-2.m3u
-          ${{ env.SOURCE_2c_URL }}|fc-le/m3u|fc-le-3.m3u
-          ${{ env.SOURCE_2d_URL }}|fc-le/m3u|fc-le-4.m3u
-          ${{ env.SOURCE_2e_URL }}|fc-le/json|fc-le-5.json
+          ${{ env.SOURCE_slle1_URL }}|sl-le/m3u|sl-le-1.m3u
+          ${{ env.SOURCE_slle2_URL }}|sl-le/m3u|sl-le-2.m3u
+          ${{ env.SOURCE_slle3_URL }}|sl-le/m3u|sl-le-3.m3u
+          ${{ env.SOURCE_slle4_URL }}|sl-le/json|sl-le-4.json
+          ${{ env.SOURCE_fcle1_URL }}|fc-le/m3u|fc-le-1.m3u
+          ${{ env.SOURCE_fcle2_URL }}|fc-le/m3u|fc-le-2.m3u
+          ${{ env.SOURCE_fcle3_URL }}|fc-le/m3u|fc-le-3.m3u
+          ${{ env.SOURCE_fcle4_URL }}|fc-le/m3u|fc-le-4.m3u
+          ${{ env.SOURCE_fcle5_URL }}|fc-le/json|fc-le-5.json
           EOF
           )
 
