@@ -380,17 +380,19 @@ jobs:
 
 
 
-  create_merged_playlists: # creates custom-formatted deduplicated merged playlists with prioritized m3u comtent-blocks from input playlists
-    needs: download_playlists # forces this job to wait for the referenced job to finish (forces sequential instead of the default parallel execution)
+  merge_playlists: # creates custom-formatted deduplicated merged playlists with prioritized m3u comtent-blocks from input playlists
+    name: Create Merged Playlists
+    needs: [download_files, convert_json] # forces this job to wait for the referenced job(s) to finish (forces sequential instead of the default parallel execution)
     if: always() # this job runs regardless of other jobs' success/failure status
     runs-on: ubuntu-latest
+    continue-on-error: true # prevents one conversion error from failing the whole workflow
     permissions:
       contents: write # grants permissions for the job to write to contents
     steps:          
       - name: Validate and Load JSON Config from Repo Secrets
         shell: bash
         env:
-          CONFIG_JSON: ${{ secrets.ENV_VARIABLES_LE }}
+          CONFIG_JSON: ${{ secrets.ENV_MERGE_LE }}
         run: |
           # Step 1: Validate JSON syntax
           if ! echo "$CONFIG_JSON" | jq empty; then
@@ -412,16 +414,17 @@ jobs:
         with:
           repository: '${{ env.DOWNLOAD_REPO }}' # specify 'owner/repo' of the source repo
           ref: ${{ env.DOWNLOAD_BRANCH }}  # set the source branch to checkout
-          token: ${{ secrets.PAT_FG_SYNC }}
+          token: ${{ secrets.PAT_FG }}
           fetch-depth: 0 # get full history to allow rebasing (recommended for every job that needs to commit and push back)
           persist-credentials: false # REQUIRED if upstream repo is private (see wiki)
           path: 'download-branch'
 
-      - name: Checkout Destination Branch in Merge Repo
+      - name: Checkout Destination Branch in Output Repo
         uses: actions/checkout@v4
         with:
           repository: '${{ env.MERGE_REPO }}' # specify 'owner/repo' of the destination repo
           ref: ${{ env.MERGE_BRANCH }}  # set the destination branch to checkout
+          token: ${{ secrets.PAT_FG }}
           fetch-depth: 0 # get full history to allow rebasing (recommended for every job that needs to commit and push back)
           persist-credentials: false # REQUIRED if upstream repo is private (see wiki)
           path: 'merge-branch'
@@ -429,7 +432,7 @@ jobs:
       - name: Download Artifact with Remote Timestamps Metadata
         uses: actions/download-artifact@v4
         with:
-          name: playlist-metadata 
+          name: final-playlist-metadata
           path: ${{ github.workspace }}
 
       - name: Process, Deduplicate, Format and Merge Playlists
