@@ -223,7 +223,7 @@ jobs:
 
 
   convert_json:
-    name: Generate M3U Playlists from JSON
+    name: Generate M3U Playlists from JSONs
     needs: download_files # dependency - this job starts only after the referenced job completes/commits
     if: always() # this job runs regardless of other jobs' success/failure status
     runs-on: ubuntu-latest
