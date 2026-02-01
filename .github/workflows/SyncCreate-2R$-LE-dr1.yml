@@ -290,7 +290,7 @@ jobs:
 
             # Sub-step 2b: Find all JSON files in the current group and map each JSON file to its specific python conversion script
             echo "------------------------------------------------------------------------------------------------------------------------"
-            echo "GROUP PROCESSING: $GROUP"
+            echo "PROCESSING JSONs in group $GROUP.."
             find "$JSON_DIR" -name "*.json" | while read -r JSON_PATH; do # finds all JSON files (pre-existing and new) in the current group
               JSON_FILE=$(basename "$JSON_PATH")
               FILE_ID="${JSON_FILE%.json}"
@@ -332,11 +332,11 @@ jobs:
                   
                   else
                     # sub-module: failure echo if python script finished but output m3u playlist is missing
-                    echo "$M3U_FILE conversion : FAILED (output file missing)."
+                    echo "$JSON_FILE conversion : FAILED (output file missing)."
                   fi
                 else
                   # sub-module: failure echo if python script itself crashed
-                  echo "$M3U_FILE conversion : FAILED (python script error)."
+                  echo "$JSON_FILE conversion : FAILED (python script error)."
                 fi
               else
                 # module: failure echo if no matching python script was found for the JSON
