@@ -213,11 +213,11 @@ jobs:
           echo "------------------------------------------------------------------------------------------------------------------------"
 
       - name: Upload Artifact with Remote Timestamps Metadata
-        if: always() # ensures metadata is uploaded even if some downloads in the batch fail
+        if: always() # ensures metadata is uploaded even if some downloads failed
         uses: actions/upload-artifact@v4
         with:
           name: playlist-metadata
-          path: ${{ github.workspace }}/remote_timestamps.meta # final source-of-truth for all remote commit timestamps
+          path: ${{ github.workspace }}/remote_timestamps.meta # source-of-truth for all remote commit timestamps
           if-no-files-found: error # forces this job to fail if the playlist-metadata file is missing
 
 
@@ -275,10 +275,11 @@ jobs:
       - name: Convert JSON to M3U Playlists
         shell: bash
         run: |
+          META_FILE="${{ github.workspace }}/remote_timestamps.meta" # defines absolute path for the meta file to ensure updates persist
           cd download-branch # changes current working directory to the destination branch 
           
           # Step 1: Identify active groups from job 1 metadata
-          ACTIVE_GROUPS=$(cut -d'|' -f1 ../remote_timestamps.meta 2>/dev/null | sed 's|\(.*\)/.*|\1|' | sort -u || echo "") # gets parent folder name by stripping the /json or /m3u sub-folder suffix from meta file entries
+          ACTIVE_GROUPS=$(cut -d'|' -f1 "$META_FILE" 2>/dev/null | sed 's|\(.*\)/.*|\1|' | sort -u || echo "") # gets parent folder name by stripping the /json or /m3u sub-folder suffix from meta file entries
 
           # Step 2: Loop through each active parent folder
           for GROUP in $ACTIVE_GROUPS; do # active groups are all those parent folders that have m3u and/or json subfolder touched by this workflow in job 1 
@@ -303,7 +304,7 @@ jobs:
                 if python3 "$SPECIFIC_SCRIPT" "$JSON_PATH" "$TARGET_M3U"; then
                   
                   # sub-module: sync timestamp onto the generated m3u playlist
-                  ORIG_IST=$(grep "|$JSON_FILE|" ../remote_timestamps.meta | cut -d'|' -f5 || echo "") # extracts the json's origonal remote timestamp from the metadata file
+                  ORIG_IST=$(grep "|$JSON_FILE|" "$META_FILE" | cut -d'|' -f5 || echo "") # extracts the json's origonal remote timestamp from the metadata file
                   if [ -f "$TARGET_M3U" ]; then
 
                     # sub-module: if remote timestamp of json exists (json was created/updated during this workflow run), sync the original remote timestamp onto the m3u 
@@ -313,28 +314,33 @@ jobs:
                       touch -d "$CLEAN_DATE $CLEAN_TIME" "$TARGET_M3U" || true # syncs the timestamp
                       MOD_TIME="$ORIG_IST"
                       TIME_NOTE="([✓]API verified)"
-                    # sub-module: if remote timestamp of json does not exist exist (json was pre-existing), fallback to syncing JSON's local modification time onto the m3u
+                    # sub-module: if remote timestamp of json does not exist (json was pre-existing), fallback to syncing JSON's local modification time onto the m3u
                     else
                       touch -r "$JSON_PATH" "$TARGET_M3U" || true
                       MOD_TIME=$(date -r "$TARGET_M3U" "+%d-%m-%Y %H:%M IST")
                       TIME_NOTE="([x]json commit time)"
                     fi
                     
-                    # Step 7: Success Echo with metrics (Job 1 Style)
+                    # sub-module: success echo with metrics
                     SIZE=$(stat -c%s "$TARGET_M3U")
                     COUNT=$(grep -c '#EXTINF' "$TARGET_M3U" || echo "0")
                     echo "$M3U_FILE conversion : SUCCESS. Last updated $MOD_TIME $TIME_NOTE. $SIZE bytes, $COUNT #EXTINF lines."
+
+                    # sub-module: update the metadata file with the new M3U info
+                    sed -i "\|^$M3U_DIR|$M3U_FILE|d" "$META_FILE" # first remove any old entry in the metadata file for this specific M3U, then append new one
+                    echo "$M3U_DIR|$M3U_FILE|$SIZE|$COUNT|$MOD_TIME|$TIME_NOTE" >> "$META_FILE"  
+                  
                   else
-                    # Failure Echo if script finished but file is missing
-                    echo "$M3U_FILE conversion : FAILED (Output file missing). 0 bytes, 0 #EXTINF lines."
+                    # sub-module: failure echo if python script finished but output m3u playlist is missing
+                    echo "$M3U_FILE conversion : FAILED (output file missing)."
                   fi
                 else
-                  # Failure Echo if Python script itself crashed
-                  echo "$M3U_FILE conversion : FAILED (Script error). 0 bytes, 0 #EXTINF lines."
+                  # sub-module: failure echo if python script itself crashed
+                  echo "$M3U_FILE conversion : FAILED (python script error)."
                 fi
               else
-                # Failure Echo if no matching script was found for the JSON
-                echo "$JSON_FILE conversion : SKIPPED (No script at $SPECIFIC_SCRIPT). 0 bytes, 0 #EXTINF lines."
+                # module: failure echo if no matching python script was found for the JSON
+                echo "$JSON_FILE conversion : SKIPPED (no python script found at $SPECIFIC_SCRIPT)."
               fi
             done
           done
@@ -342,25 +348,34 @@ jobs:
 
       - name: Commit and Push Generated Playlists
         run: |
-          cd download-branch || exit 0
+          # Step 1: Enter destination directory
+          cd download-branch # changes current working directory to the destination branch 
           
-          # Step 1: Configure Git using Actions Bot identity
+          # Step 2: Configure git
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git remote set-url origin https://x-access-token:${{ secrets.PAT_FG }}@://github.com{{ env.DOWNLOAD_REPO }}.git
+          git remote set-url origin https://x-access-token:${{ secrets.PAT_FG }}@github.com/${{ env.DOWNLOAD_REPO }}.git # avoids the alternative 'insteadOf' approach to prevent leakage of secret in logs
           
-          # Step 2: Stage newly generated M3U files
+          # Step 3: Stage newly generated M3U playlists
           git add . 
           
           # Step 3: Conditional Push
-          if git diff --cached --quiet; then
-            echo "RESULT: No changes found in generated playlists. Skipping push."
+          if git diff --cached --quiet; then # checks if there are any changes
+            echo "RESULT: No changes found to commit in any generated M3U playlists. Skipping push."
           else
-            # Only commits and pushes if files have actually changed
-            git commit -m "Automated conversion cycle - $(date '+%d-%m-%Y %H:%M IST')" || echo "No changes to commit."
-            git push origin ${{ env.DOWNLOAD_BRANCH }} || echo "FAILURE: Git push failed. Skipping."
-            echo "RESULT: Successfully committed and pushed generated playlists."
+            git commit -m "Automated generation from JSON" # only commits if a binary or text difference exists, alongwith commit message
+            # git pull origin ${{ env.DOWNLOAD_BRANCH }} --rebase # rebases pull to ensure local is ahead of remote (enable if facing commit/push failures)
+            git push origin ${{ env.DOWNLOAD_BRANCH }} || echo "FAILURE: Git push failed. Skipping." # pushes to the destination branch
+            echo "RESULT: Successfully committed and pushed generated M3U playlists."
           fi
+
+      - name: Re-upload Artifact with Remote Timestamps Metadata
+        if: always() # ensures metadata is uploaded even if some conversions failed
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-playlist-metadata # has merged metadata of job 1 m3u downloads and job 2 json conversions
+          path: ${{ github.workspace }}/remote_timestamps.meta # final source-of-truth for all remote commit timestamps
+          if-no-files-found: error # forces this job to fail if the playlist-metadata file is missing
 
 
 
