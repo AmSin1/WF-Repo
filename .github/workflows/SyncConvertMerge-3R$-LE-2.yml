@@ -436,7 +436,6 @@ jobs:
           path: ${{ github.workspace }}
 
       - name: Process, Deduplicate, Format and Merge Playlists
-        shell: bash
         run: |
           TOTAL_GROUP_FAILURES=0 # tracks global failures across the clean and merge processes of all merged playlists, starts from 0
           PLAYLIST_METADATA="${{ github.workspace }}/remote_timestamps.meta"
