@@ -1,4 +1,4 @@
-tname: SyncCreate 2R $ LE dr1
+name: SyncCreate 2R $ LE dr1
 
 on: 
   workflow_dispatch: # allows manual workflow run from the Actions tab (workflow must be in default branch to work)
