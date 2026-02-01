@@ -589,17 +589,7 @@ jobs:
           }
 
           # Step 2: Dynamic execution loop (using indirect expansion) for playlist groups
-          
-
-
-          
-          
-          
-          
-          
-          
-          
-          DIRS=$(cut -d'|' -f1 "$PLAYLIST_METADATA" | sort -u) # extracts all unique directories in the consolidated metadata file
+          DIRS=$(cut -d'|' -f1 "$PLAYLIST_METADATA" | sed 's|\(.*\)/.*|\1|' | sort -u) # extracts all unique directories in the consolidated metadata file
           for DIR in $DIRS; do # maps the identified directories to merged playlist names
               VAR_SUFFIX=$(echo "$DIR" | tr '-' '_') # creates suffix for the lookup variable from directory name (e.g., sl-le -> sl_le)
               LOOKUP_VAR="MERGED_PLAYLIST_$VAR_SUFFIX" # constructs the lookup variable (e.g., sl-le -> MERGED_PLAYLIST_sl_le)
@@ -608,7 +598,9 @@ jobs:
                 echo "DEBUG: Skipping group $DIR - no 'env.$LOOKUP_VAR' defined."
                 continue
               fi
-              mapfile -t FILES_FOR_GROUP < <(grep "^$DIR|" "$PLAYLIST_METADATA" | cut -d'|' -f2) # extracts only the input playlist names belonging to current group, and puts these filenames into an array
+
+              # Step 2a: Identify active folder groups (touched by Job 1 and so present in metadata file), pick all M3Us present in the active folder (new + pre-existing)
+              mapfile -t FILES_FOR_GROUP < <(find "download-branch/$DIR" -maxdepth 1 -name "*.m3u" ! -name "$OUTPUT_NAME" -exec basename {} \;) # for merge process, picks only those folders in download-branch that are present in timestamps metadata file
               if [ ${#FILES_FOR_GROUP[@]} -gt 0 ]; then # checks if any input playlists for this group were actually found
                   if process_group "$DIR" "$OUTPUT_NAME" "${FILES_FOR_GROUP[@]}"; then # calls the 'process_group' function with the dynamic folder, merged playlist name, and input playlist array
                       echo "$DIR/$OUTPUT_NAME" >> ./merged_files_to_commit.txt # registers the successfully merged playlist for the commit step
