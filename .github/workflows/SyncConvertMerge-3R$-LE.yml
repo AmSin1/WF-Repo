@@ -1,4 +1,4 @@
-name: SyncCreateMerge 3R $ LE dr1
+name: SyncConvertMerge 3R $ LE
 
 on: 
   workflow_dispatch: # allows manual workflow run from the Actions tab (workflow must be in default branch to work)
