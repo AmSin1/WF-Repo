@@ -290,7 +290,7 @@ jobs:
 
             # Sub-step 2b: Find all JSON files in the current group and map each JSON file to its specific python conversion script
             echo "------------------------------------------------------------------------------------------------------------------------"
-            echo "PROCESSING JSONs in group $GROUP.."
+            echo "PROCESSING JSONs in group $GROUP..."
             find "$JSON_DIR" -name "*.json" | while read -r JSON_PATH; do # finds all JSON files (pre-existing and new) in the current group
               JSON_FILE=$(basename "$JSON_PATH")
               FILE_ID="${JSON_FILE%.json}"
@@ -436,6 +436,7 @@ jobs:
           path: ${{ github.workspace }}
 
       - name: Process, Deduplicate, Format and Merge Playlists
+        shell: bash
         run: |
           TOTAL_GROUP_FAILURES=0 # tracks global failures across the clean and merge processes of all merged playlists, starts from 0
           PLAYLIST_METADATA="${{ github.workspace }}/remote_timestamps.meta"
@@ -460,31 +461,17 @@ jobs:
             for src in "${sources[@]}"; do
               local src_path="download-branch/$dir/$src"
 
-              # module: fallback to playlist in repository if current download of an input playlist fails 
-              if [ ! -f "$src_path" ]; then # if input playlist is missing (current download failed), uses the existing playlist in the repo for merge process
-                if [ -f "merge-branch/$dir/$src" ]; then
-                  echo "FALLBACK: Current download not found for playlist $src. Using existing previous instance from repository."
-                  mkdir -p "download-branch/$dir"
-                  cp "merge-branch/$dir/$src" "$src_path" # pulls the existing playlist from merge repo into processing directory
-                else
-                  echo "SKIPPED: Download failed for playlist $src AND no previous instance found in repository. Skipping file."
-                  continue
-                fi
+              # module: skip the input playlist if missing in download repo
+              if [ ! -f "$src_path" ]; then # if input playlist is missing in download repo, skip it
+                echo "SKIPPED: Playlist $src not found in repository. Skipping file."
+                continue
               fi
 
-              # module: fetch remote timestamp and time-note for the input playlist from the consolidated metadata file
-              local meta_entry=$(grep "|$src|" "$PLAYLIST_METADATA" || echo "")
-              local LAST_MOD="" # initializes file to capture remote timestamps and time-notes from the consolidated metadata file
-              if [[ -n "$meta_entry" && "$(echo "$meta_entry" | cut -d'|' -f3)" != "FAILED" ]]; then   
-                # sub-module: for input playlist successfully downloaded in this workflow run, extract from condolidated metadata file
-                local ts=$(echo "$meta_entry" | cut -d'|' -f5) # extracts field 5 (remote timestamp) 
-                local note=$(echo "$meta_entry" | cut -d'|' -f6) # extracts field 6 (time note)
-                LAST_MOD="$ts $note" # combines remote timestamp and time note
-              else
-                # sub-module: for input playlist not downloaded in this worflow run, fallback to timestamp of the existing file in the repo
-                local ts=$(TZ='Asia/Kolkata' date -r "$src_path" "+%d-%m-%Y %H:%M IST")
-                LAST_MOD="$ts ([x]repo fallback)"
-              fi
+              # module: for input playlist in download repo, fetch remote timestamp (from file system) and time-note (from consolidated metadata file)
+              local f_time=$(TZ='Asia/Kolkata' date -r "$src_path" "+%d-%m-%Y %H:%M IST") # pulls the remote timestamp already touched onto the input playlist by Job 1 or Job 2 of this workflow
+              local f_note=$(grep "|$src|" "$PLAYLIST_METADATA" | cut -d'|' -f6 || echo "") # extracts the time note for the input playlist from the metadata file
+              [ -z "$f_note" ] && f_note="([x]m3u commit time)" # sets the playlist's time note if the same is not available from metadata file
+              local LAST_MOD="$f_time $f_note" # combines remote timestamp and time note
 
               # module: clean input playlist (remove carriage returns and BOM) and echo its success/failure metrics
               if (set -e; sed -i '1s/^\xef\xbb\xbf//; s/\r//g' "$src_path"); then # strips Windows line endings (\r) and any non-standard character markers
@@ -494,7 +481,7 @@ jobs:
                 cleaned_details+="\n  - $src: last updated $LAST_MOD, $file_size bytes, $extinf_count #EXTINF lines"  # for appending to the summary list for the group-level debug echo
                 echo "Cleaned input playlist $src (size: $file_size bytes). $extinf_count #EXTINF lines found." # debug for cleaning step for individual input playlists
               else
-                echo "ERROR: Cleaning FAILED for input playlist $src or valid playlist $src NOT FOUND. Skipping file."
+                echo "ERROR: Cleaning FAILED for input playlist $src. Skipping file."
               fi
             done
 
@@ -503,8 +490,8 @@ jobs:
               echo -e "RESULT: Cleaning of input playlists for merged playlist $output COMPLETED. $successful_san_count input playlists successfully cleaned:$cleaned_details"
             fi
 
-            # Sub-step 1c: Gate - if no input playlists for this merged playlist were cleaned, skip its merge process
-            if [ $successful_san_count -eq 0 ]; then # gate: if none of the input playlists for this merged playlist were successfully cleaned, skips its merge process, workflow continues to cleaning imput playlists for the next merged playlist (ensured by 'return' rather than 'exit')
+            # Sub-step 1c: Gate - if no input playlists for this merged playlist were found or cleaned, skip its merge process
+            if [ $successful_san_count -eq 0 ]; then # merge process for this merged playlist is skipped, workflow continues to cleaning imput playlists for the next merged playlist (ensured by 'return' rather than 'exit')
               echo "RESULT: Merge process for $output FAILED at cleaning stage. Found no valid input playlists or cleaning failed for all input playlists."
               return 1 # exits the process_group function with an error code; TOTAL_GROUP_FAILURES=$((TOTAL_GROUP_FAILURES + 1)) logic used in calling the function ensures that the failure is recorded
             fi
@@ -520,7 +507,7 @@ jobs:
 
               # module: initialize merged playlist
               echo "#EXTM3U" > "$target" # initializes the merged playlist with standard EXTM3U header
-              printf "\n" >> "$target" # adds 1-line trailing spacing
+              printf "\n" >> "$target" # appends 1-line trailing spacing
               touch "$TRACKER" # initialize a fresh instance of the tracker at this point
 
               # module: append streams from a cleaned input playlist to the merged playlist after deduplication, custom spacing and formatting; echo result
@@ -529,21 +516,18 @@ jobs:
                 local src_path="download-branch/$dir/$src"
                 [ ! -f "$src_path" ] && continue
 
-                # sub-module: fetch-timestamps for the block-level header (similar logic to cleaning stage)
-                local meta_entry=$(grep "|$src|" "$PLAYLIST_METADATA" || echo "")
-                local LAST_MOD=""
-                if [[ -n "$meta_entry" && "$(echo "$meta_entry" | cut -d'|' -f3)" != "FAILED" ]]; then
-                  LAST_MOD="$(echo "$meta_entry" | cut -d'|' -f5) $(echo "$meta_entry" | cut -d'|' -f6)"
-                else
-                  LAST_MOD="$(TZ='Asia/Kolkata' date -r "$src_path" '+%d-%m-%Y %H:%M IST') ([x]repo fallback)"
-                fi
+                # sub-module: re-fetch timestamps for the block header (identical logic to cleaning stage)
+                local b_time=$(TZ='Asia/Kolkata' date -r "$src_path" "+%d-%m-%Y %H:%M IST")
+                local b_note=$(grep "|$src|" "$PLAYLIST_METADATA" | cut -d'|' -f6 || echo "")
+                [ -z "$b_note" ] && b_note="([x]m3u commit time)"
+                local BLOCK_MOD="$b_time $b_note" 
 
-                # sub-module: awk fu    nction for deduplication and custom formatting
-                awk -v src_name="$src" -v tracker="$TRACKER" -v idx="$block_index" -v mod_date="$LAST_MOD" -v s=$RANDOM '
+                # sub-module: awk function for deduplication and custom formatting
+                awk -v src_name="$src" -v tracker="$TRACKER" -v idx="$block_index" -v mod_date="$BLOCK_MOD" -v s=$RANDOM '
 
                   # pre-processing
                   BEGIN {
-                    count=0; tag_buf=""; file_buf=""; found_stream=0; # ignore everything till found_stream tuens 1, then start processing everything
+                    count=0; tag_buf=""; file_buf=""; found_stream=0; # ignore everything till found_stream turns 1, then start processing everything
                     if ((getline < tracker) > 0) { # pre-load disk tracker - load existing unique stream URLs into a memory array
                       do { seen[$0] = 1 } while ((getline < tracker) > 0)
                       close(tracker)
@@ -560,7 +544,7 @@ jobs:
                     } else if (/^(http|https):\/\//) {
                         url = $0 # deduplicate URLs using the group tracker                       
                         if (!seen[url]) { # deduplication: internal memory check
-                            print url >> tracker #   update disk tracker
+                            print url >> tracker # update disk tracker
                             seen[url] = 1 # update memory array                      
                             file_buf = file_buf tag_buf url "\n"
                             count++
@@ -596,7 +580,7 @@ jobs:
               local final_path="merge-branch/$dir/$output"
               local final_size=$(stat -c%s "$final_path")
               local final_extinf=$(grep -c "#EXTINF" "$final_path" || true)
-              echo "RESULT: Merge process for $output COMPLETED. $output ($final_size bytes) is ready to push. $final_extinf #EXTINF lines present." # debug at the end of merge process
+              echo "RESULT: Merge process for $output COMPLETED. $output ($final_size bytes) is ready to push. $final_extinf #EXTINF lines present."  
               return 0
             else
               echo "RESULT: Merge process for $output FAILED at deduplication, fomratting or appending stage." 
@@ -605,6 +589,16 @@ jobs:
           }
 
           # Step 2: Dynamic execution loop (using indirect expansion) for playlist groups
+          
+
+
+          
+          
+          
+          
+          
+          
+          
           DIRS=$(cut -d'|' -f1 "$PLAYLIST_METADATA" | sort -u) # extracts all unique directories in the consolidated metadata file
           for DIR in $DIRS; do # maps the identified directories to merged playlist names
               VAR_SUFFIX=$(echo "$DIR" | tr '-' '_') # creates suffix for the lookup variable from directory name (e.g., sl-le -> sl_le)
