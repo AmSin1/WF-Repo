@@ -294,6 +294,7 @@ jobs:
             find "$JSON_DIR" -name "*.json" | while read -r JSON_PATH; do # finds all JSON files (pre-existing and new) in the current group
               JSON_FILE=$(basename "$JSON_PATH")
               FILE_ID="${JSON_FILE%.json}"
+              M3U_FILE="${FILE_ID}.m3u" # explicitly define for echo statements
               SPECIFIC_SCRIPT="scripts/${FILE_ID}.py" # maps JSON file to its specific unique python script stored in the 'scripts' folder at the root directory of 'download-branch' (e.g., scripts/sl-le-4.py)
               M3U_DIR="$GROUP/m3u" # sets target m3u folder 
               TARGET_M3U="$M3U_DIR/${FILE_ID}.m3u" # sets target m3u file path
