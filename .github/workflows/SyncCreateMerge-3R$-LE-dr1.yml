@@ -440,7 +440,7 @@ jobs:
         run: |
           TOTAL_GROUP_FAILURES=0 # tracks global failures across the clean and merge processes of all merged playlists, starts from 0
           PLAYLIST_METADATA="${{ github.workspace }}/remote_timestamps.meta"
-          touch ../merged_files_to_commit.txt # creates a registry file to track successfully created merged playlists for the commit step
+          touch ./merged_files_to_commit.txt # creates a registry file to track successfully created merged playlists for the commit step
 
           # Step 1: Use helper function for group-wise cleaning and merging
           process_group() { # function encapsulating cleaning and merging processes for any given merged playlist folder
@@ -599,7 +599,7 @@ jobs:
                 continue
               fi
 
-              # Step 2a: Identify active folder groups (touched by Job 1 and so present in metadata file), pick all M3Us present in the active folder (new + pre-existing)
+              # Sub-step 2a: Identify active folder groups (touched by Job 1 and so present in metadata file), pick all M3Us present in the active folder (new + pre-existing)
               mapfile -t FILES_FOR_GROUP < <(find "download-branch/$DIR" -maxdepth 1 -name "*.m3u" ! -name "$OUTPUT_NAME" -exec basename {} \;) # for merge process, picks only those folders in download-branch that are present in timestamps metadata file
               if [ ${#FILES_FOR_GROUP[@]} -gt 0 ]; then # checks if any input playlists for this group were actually found
                   if process_group "$DIR" "$OUTPUT_NAME" "${FILES_FOR_GROUP[@]}"; then # calls the 'process_group' function with the dynamic folder, merged playlist name, and input playlist array
@@ -620,9 +620,9 @@ jobs:
           # Step 1: Configure git             
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git remote set-url origin https://x-access-token:${{ secrets.PAT_FG_SYNC }}@github.com/${{ env.MERGE_REPO }}.git # avoids the alternative 'insteadOf' approach to prevent leakage of secret in logs
+          git remote set-url origin https://x-access-token:${{ secrets.PAT_FG }}@github.com/${{ env.MERGE_REPO }}.git # avoids the alternative 'insteadOf' approach to prevent leakage of secret in logs
   
-          # Step 2: Dynamically load the merged playlists registered in the previous step
+          # Step 2: Load the merged playlists registered in the previous step
           if [ -f "../merged_files_to_commit.txt" ]; then
             mapfile -t FILES < ../merged_files_to_commit.txt
           else
@@ -666,7 +666,7 @@ jobs:
           echo "RESULT: $SKIPPED_COUNT merged playlist(s) were found unchanged and were skipped: ${SKIPPED_NAMES:-(none)}"
           echo "------------------------------------------------------------------------------------------------------------------------"
           
-          # Step 5: Final job failure reporting         
+          # Step 5: Final job failure reporting (if group-level errors occurred)
           if [ "${{ env.TOTAL_FAILURES }}" -gt 0 ]; then
             echo "DEBUG: Final Status: FAIL (workflow ended with $TOTAL_FAILURES group failures)"
             exit 1
