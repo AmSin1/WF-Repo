@@ -436,9 +436,22 @@ jobs:
           path: ${{ github.workspace }}
 
       - name: Process, Deduplicate, Format and Merge Playlists
+        shell: bash
         run: |
+
+          set +e 
+          echo "DEBUG: Starting Merge Process Step..."
+          
           TOTAL_GROUP_FAILURES=0 # tracks global failures across the clean and merge processes of all merged playlists, starts from 0
           PLAYLIST_METADATA="${{ github.workspace }}/remote_timestamps.meta"
+          
+          if [ ! -f "$PLAYLIST_METADATA" ]; then
+            echo "ERROR: Metadata file NOT FOUND at $PLAYLIST_METADATA"
+            echo "Contents of workspace: $(ls -R ${{ github.workspace }})"
+            exit 1
+          fi          
+          echo "SUCCESS: Metadata file found. Extracting directories..."
+          
           touch ./merged_files_to_commit.txt # creates a registry file to track successfully created merged playlists for the commit step
 
           # Step 1: Use helper function for group-wise cleaning and merging
@@ -589,23 +602,45 @@ jobs:
 
           # Step 2: Dynamic execution loop (using indirect expansion) for playlist groups
           DIRS=$(cut -d'|' -f1 "$PLAYLIST_METADATA" | sed 's|\(.*\)/.*|\1|' | sort -u) # extracts all unique directories in the consolidated metadata file
+         
+     
+          if [ -z "$DIRS" ]; then
+            echo "ERROR: No directories found in $PLAYLIST_METADATA. Check Job 1/2 artifact contents."
+            exit 1
+          fi
+          echo "Found Active Groups: $DIRS"          
+               
+          
           for DIR in $DIRS; do # maps the identified directories to merged playlist names
               VAR_SUFFIX=$(echo "$DIR" | tr '-' '_') # creates suffix for the lookup variable from directory name (e.g., sl-le -> sl_le)
               LOOKUP_VAR="MERGED_PLAYLIST_$VAR_SUFFIX" # constructs the lookup variable (e.g., sl-le -> MERGED_PLAYLIST_sl_le)
               OUTPUT_NAME="${!LOOKUP_VAR}" # indirect expansion to get the variable value (e.g., "sl-le-all.m3u")
+            
+             echo "DEBUG: Checking Group: $DIR | Lookup Var: $LOOKUP_VAR | Output Name: ${OUTPUT_NAME:-(NOT DEFINED)}"                   
+              
               if [ -z "$OUTPUT_NAME" ]; then # skips the folder (e.g., sl-le) if its merged playlist variable (e.g., MERGED_PLAYLIST_sl_le) hasn't been defined in the 'env:'
                 echo "DEBUG: Skipping group $DIR - no 'env.$LOOKUP_VAR' defined."
                 continue
               fi
 
+              # Step 3: Pick ALL M3Us
+              [ ! -d "download-branch/$DIR" ] && { echo "WARNING: Directory download-branch/$DIR not found."; continue; }
+
               # Sub-step 2a: Identify active folder groups (touched by Job 1 and so present in metadata file), pick all M3Us present in the active folder (new + pre-existing)
               mapfile -t FILES_FOR_GROUP < <(find "download-branch/$DIR" -maxdepth 1 -name "*.m3u" ! -name "$OUTPUT_NAME" -exec basename {} \;) # for merge process, picks only those folders in download-branch that are present in timestamps metadata file
               if [ ${#FILES_FOR_GROUP[@]} -gt 0 ]; then # checks if any input playlists for this group were actually found
+
+                  echo "DEBUG: Found ${#FILES_FOR_GROUP[@]} source files for $DIR. Starting merge..."
+                  
                   if process_group "$DIR" "$OUTPUT_NAME" "${FILES_FOR_GROUP[@]}"; then # calls the 'process_group' function with the dynamic folder, merged playlist name, and input playlist array
                       echo "$DIR/$OUTPUT_NAME" >> ./merged_files_to_commit.txt # registers the successfully merged playlist for the commit step
                   else
                       TOTAL_GROUP_FAILURES=$((TOTAL_GROUP_FAILURES + 1)) # increments the global error counter everytime the merge function fails 
                   fi
+
+              else
+                  echo "DEBUG: No source M3U files found in download-branch/$DIR."         
+              
               fi
           done             
           
