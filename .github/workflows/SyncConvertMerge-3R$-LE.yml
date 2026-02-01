@@ -390,7 +390,6 @@ jobs:
       contents: write # grants permissions for the job to write to contents
     steps:          
       - name: Validate and Load JSON Config from Repo Secrets
-        shell: bash
         env:
           CONFIG_JSON: ${{ secrets.ENV_MERGE_LE }}
         run: |
