@@ -469,7 +469,7 @@ jobs:
                 continue
               fi 
 
-              # module: for input playlist in download repo, fetch remote timestamp (from file system) and time-note (from consolidated metadata file)
+              # module: pre-cleaning, for input playlist in download repo, fetch remote commit timestamp (from file system) and time-note (from consolidated metadata file)
               local f_time=$(TZ='Asia/Kolkata' date -r "$src_path" "+%d-%m-%Y %H:%M IST") # pulls the remote timestamp already touched onto the input playlist by Job 1 or Job 2 of this workflow
               local f_note=$(grep "|$filename|" "$PLAYLIST_METADATA" | cut -d'|' -f6 || echo "") # extracts the time note for the input playlist from the metadata file
               [ -z "$f_note" ] && f_note="([x]m3u commit time)" # sets the playlist's time note if the same is not available from metadata file
@@ -477,6 +477,13 @@ jobs:
 
               # module: clean input playlist (remove carriage returns and BOM) and echo its success/failure metrics
               if sed -i '1s/^\xef\xbb\xbf//; s/\r//g' "$src_path" 2>/dev/null; then # strips Windows line endings (\r) and any non-standard character markers
+         
+                # sub-module: post-cleaning, reapply the extracted remote commit timestamp onto the cleaned input playlist (as the sed command in cleaning resets the file's 'modified time' to NOW)
+                local touch_date=$(echo "$f_time" | awk '{print $1}' | awk -F'-' '{print $3"-"$2"-"$1}')
+                local touch_time=$(echo "$f_time" | awk '{print $2}')
+                touch -d "$touch_date $touch_time" "$src_path" 2>/dev/null                
+                
+                # sub-module: echo input playlist level success metrics
                 successful_san_count=$((successful_san_count + 1))
                 local file_size=$(stat -c%s "$src_path") # file size in bytes of the cleaned input playlist
                 local extinf_count=$(grep -c "#EXTINF" "$src_path" || true) # count of #EXTINF lines present in the cleaned input playlist
