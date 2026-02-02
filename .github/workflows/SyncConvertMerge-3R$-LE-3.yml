@@ -465,7 +465,7 @@ jobs:
 
               # module: skip the input playlist if missing in download repo
               if [ ! -f "$src_path" ]; then # if input playlist is missing in download repo, skip it
-                echo "SKIPPED: Playlist $src not found in repository. Skipping file."
+                echo "SKIPPED: Playlist $filename not found in repository. Skipping file."
                 continue
               fi 
 
@@ -480,10 +480,10 @@ jobs:
                 successful_san_count=$((successful_san_count + 1))
                 local file_size=$(stat -c%s "$src_path") # file size in bytes of the cleaned input playlist
                 local extinf_count=$(grep -c "#EXTINF" "$src_path" || true) # count of #EXTINF lines present in the cleaned input playlist
-                cleaned_details+="\n  - $src: last updated $LAST_MOD, $file_size bytes, $extinf_count #EXTINF lines"  # for appending to the summary list for the group-level debug echo
-                echo "Cleaned input playlist $src (size: $file_size bytes). $extinf_count #EXTINF lines found." # debug for cleaning step for individual input playlists
+                cleaned_details+="\n  - $filename: last updated $LAST_MOD, $file_size bytes, $extinf_count #EXTINF lines"  # for appending to the summary list for the group-level debug echo
+                echo "Cleaned input playlist $filename (size: $file_size bytes). $extinf_count #EXTINF lines found." # debug for cleaning step for individual input playlists
               else
-                echo "ERROR: Cleaning FAILED for input playlist $src. Skipping file."
+                echo "ERROR: Cleaning FAILED for input playlist $filename. Skipping file."
               fi
             done
 
@@ -571,7 +571,7 @@ jobs:
                 if grep -q "Playlist from $filename" "$target"; then # only increment block_index if this block was successfully added to the target
                    block_index=$((block_index + 1))
                 fi        
-                echo "Stream URLs from $src deduplicated and appended. $output now has $(wc -l < "$TRACKER") unique stream URLs."
+                echo "Stream URLs from $filename deduplicated and appended. $output now has $(wc -l < "$TRACKER") unique stream URLs."
               done # end of module for deduplication, custom spacing, formatting and appending streams
               
               # module: clean up tracker
@@ -610,7 +610,8 @@ jobs:
 
               # Sub-step 2b: Call the process_group function for found input playlists
               if [ ${#FILES_FOR_GROUP[@]} -gt 0 ]; then # checks if any input playlists for this group were actually found
-                  echo "DEBUG: Found ${#FILES_FOR_GROUP[@]} input M3U playlists in $DIR/m3u subfolder."
+                  echo "-----------------------------------------------------------------------------"
+                  echo "DISCOVERY: Found ${#FILES_FOR_GROUP[@]} input M3U playlists in $DIR/m3u subfolder."
                   if process_group "$DIR" "$OUTPUT_NAME" "${FILES_FOR_GROUP[@]}"; then # calls the 'process_group' function with the dynamic folder, merged playlist name, and input playlist array
                       echo "$DIR/$OUTPUT_NAME" >> ./merged_files_to_commit.txt # registers the successfully merged playlist for the commit step
                   else
