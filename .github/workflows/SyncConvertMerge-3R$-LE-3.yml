@@ -600,7 +600,7 @@ jobs:
               fi
 
               # Sub-step 2a: Identify active folder groups (touched by Job 1 and so present in metadata file), pick all M3Us present in the active folder (new + pre-existing)
-              mapfile -t FILES_FOR_GROUP < <(find "download-branch/$DIR" -maxdepth 1 -name "*.m3u" ! -name "$OUTPUT_NAME" -exec basename {} \;) # for merge process, picks only those folders in download-branch that are present in timestamps metadata file
+              mapfile -t FILES_FOR_GROUP < <(find "download-branch/$DIR" -mindepth 1 -name "*.m3u" ! -name "$OUTPUT_NAME" -exec basename {} \;) # for merge process, picks only those folders in download-branch that are present in timestamps metadata file
               if [ ${#FILES_FOR_GROUP[@]} -gt 0 ]; then # checks if any input playlists for this group were actually found
                   if process_group "$DIR" "$OUTPUT_NAME" "${FILES_FOR_GROUP[@]}"; then # calls the 'process_group' function with the dynamic folder, merged playlist name, and input playlist array
                       echo "$DIR/$OUTPUT_NAME" >> ./merged_files_to_commit.txt # registers the successfully merged playlist for the commit step
