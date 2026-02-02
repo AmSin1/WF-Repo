@@ -475,7 +475,7 @@ jobs:
               local note=""
               if [[ -n "$meta_entry" ]]; then
                 ts=$(echo "$meta_entry" | cut -d'|' -f5) # extracts the timestamp
-                note=$(echo "$meta_entry" | cut -d'|' -f6)  extracts the time-note
+                note=$(echo "$meta_entry" | cut -d'|' -f6) # extracts the time-note
                 local LAST_MOD="$ts $note" # combines remote timestamp and time note
                 local clean_d=$(echo "$ts" | awk '{print $1}' | awk -F'-' '{print $3"-"$2"-"$1}') # remote date in touch-friendly format (YYYY-MM-DD HH:MM)
                 local clean_t=$(echo "$ts" | awk '{print $2}') # remote time in touch-friendly format
