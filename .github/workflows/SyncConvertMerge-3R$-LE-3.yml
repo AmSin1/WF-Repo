@@ -469,26 +469,34 @@ jobs:
                 continue
               fi 
 
-              # module: pre-cleaning, for input playlist in download repo, fetch remote commit timestamp (from file system) and time-note (from consolidated metadata file)
-              local f_time=$(TZ='Asia/Kolkata' date -r "$src_path" "+%d-%m-%Y %H:%M IST") # pulls the remote timestamp already touched onto the input playlist by Job 1 or Job 2 of this workflow
-              local f_note=$(grep "|$filename|" "$PLAYLIST_METADATA" | cut -d'|' -f6 || echo "") # extracts the time note for the input playlist from the metadata file
-              [ -z "$f_note" ] && f_note="([x]m3u commit time)" # sets the playlist's time note if the same is not available from metadata file
-              local LAST_MOD="$f_time $f_note" # combines remote timestamp and time note
+              # module: for input playlist downloaded in Jobs 1 or 2, fetch remote commit timestamp and time-note from the consolidated metadata file
+              local meta_entry=$(grep "|$filename|" "$PLAYLIST_METADATA" | head -n 1 || echo "")
+              local ts=""
+              local note=""
+              if [[ -n "$meta_entry" ]]; then
+                ts=$(echo "$meta_entry" | cut -d'|' -f5) # extracts the timestamp
+                note=$(echo "$meta_entry" | cut -d'|' -f6)  extracts the time-note
+                local LAST_MOD="$ts $note" # combines remote timestamp and time note
+                local clean_d=$(echo "$ts" | awk '{print $1}' | awk -F'-' '{print $3"-"$2"-"$1}') # remote date in touch-friendly format (YYYY-MM-DD HH:MM)
+                local clean_t=$(echo "$ts" | awk '{print $2}') # remote time in touch-friendly format
+ 
+              # module: for pre-existing input playlists in download repo, fallback to file's system time
+              else
+                local LAST_MOD=$(TZ='Asia/Kolkata' date -r "$src_path" "+%d-%m-%Y %H:%M IST")" ([x]m3u commit time)"
+              fi
 
               # module: clean input playlist (remove carriage returns and BOM) and echo its success/failure metrics
               if sed -i '1s/^\xef\xbb\xbf//; s/\r//g' "$src_path" 2>/dev/null; then # strips Windows line endings (\r) and any non-standard character markers
          
-                # sub-module: post-cleaning, reapply the extracted remote commit timestamp onto the cleaned input playlist (as the sed command in cleaning resets the file's 'modified time' to NOW)
-                local touch_date=$(echo "$f_time" | awk '{print $1}' | awk -F'-' '{print $3"-"$2"-"$1}')
-                local touch_time=$(echo "$f_time" | awk '{print $2}')
-                touch -d "$touch_date $touch_time" "$src_path" 2>/dev/null                
+                # sub-module: post-cleaning, apply the extracted remote commit timestamp onto the cleaned input playlist   
+                [ -n "$ts" ] && touch -d "$clean_d $clean_t" "$src_path" 2>/dev/null
                 
                 # sub-module: echo input playlist level success metrics
                 successful_san_count=$((successful_san_count + 1))
                 local file_size=$(stat -c%s "$src_path") # file size in bytes of the cleaned input playlist
                 local extinf_count=$(grep -c "#EXTINF" "$src_path" || true) # count of #EXTINF lines present in the cleaned input playlist
                 cleaned_details+="\n  - $filename: last updated $LAST_MOD, $file_size bytes, $extinf_count #EXTINF lines"  # for appending to the summary list for the group-level debug echo
-                echo "Cleaned input playlist $filename (size: $file_size bytes). $extinf_count #EXTINF lines found." # debug for cleaning step for individual input playlists
+                echo "Cleaned input playlist $filename (size: $file_size bytes). $extinf_count #EXTINF lines found."
               else
                 echo "ERROR: Cleaning FAILED for input playlist $filename. Skipping file."
               fi
@@ -528,7 +536,7 @@ jobs:
 
                 # sub-module: re-fetch timestamps for the block header (identical logic to cleaning stage)
                 local b_time=$(TZ='Asia/Kolkata' date -r "$src_path" "+%d-%m-%Y %H:%M IST")
-                local b_note=$(grep "|$filename|" "$PLAYLIST_METADATA" | cut -d'|' -f6 || echo "")
+                local b_note=$(grep "|$filename|" "$PLAYLIST_METADATA" | head -n 1 | cut -d'|' -f6 || echo "")
                 [ -z "$b_note" ] && b_note="([x]m3u commit time)"
                 local BLOCK_MOD="$b_time $b_note" 
 
