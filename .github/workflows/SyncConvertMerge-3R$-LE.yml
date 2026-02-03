@@ -328,7 +328,7 @@ jobs:
                     echo "$M3U_FILE conversion : SUCCESS. Last updated $MOD_TIME $TIME_NOTE. $SIZE bytes, $COUNT #EXTINF lines."
 
                     # sub-module: update the metadata file with the new M3U info
-                    sed -i ",^$M3U_DIR|$M3U_FILE,d" "$META_FILE" # first remove any old entry in the metadata file for this specific M3U, then append new one
+                    sed -i "\:^$M3U_DIR|$M3U_FILE:d" "$META_FILE" # first remove any old entry in the metadata file for this specific M3U, then append new one
                     echo "$M3U_DIR|$M3U_FILE|$SIZE|$COUNT|$MOD_TIME|$TIME_NOTE" >> "$META_FILE"  
                   
                   else
