@@ -554,21 +554,21 @@ jobs:
                   } 
     
                   # deduplication
-                  /^#EXTINF/ { found_stream=1 } 
+                  /^#EXTINF/ { found_stream=1 } # found_stream: 1 when the first #EXTINF line in the input playlist is found
                   {
-                    if (found_stream == 0) next; 
+                    if (found_stream == 0) next; # discard all lines before first #EXTINF is found, process everything thereon
                     if (/^#/) {
-                        tag_buf = tag_buf $0 "\n" 
+                        tag_buf = tag_buf $0 "\n" # buffer metadata lines
                     } else if (/^(http|https):\/\//) {
-                        url = $0                       
-                        if (!seen[url]) { 
-                            print url >> tracker 
-                            seen[url] = 1                   
+                        url = $0 # deduplicate URLs using the group tracker         
+                        if (!seen[url]) { # deduplication: internal memory check
+                            print url >> tracker # update disk tracker
+                            seen[url] = 1 # update memory array    
                             if (tag_buf != "") { 
-                                file_buf = file_buf tag_buf url "\n" 
-                                tag_buf = "" 
+                                file_buf = file_buf tag_buf url "\n" # only prepends the #EXTINF metadata if it's the first URL for this #EXTINF
+                                tag_buf = "" # resets the metadata buffer so that the 2nd URL (if available) for the same #EXTINF doesnt print the #EXTINF metadata again
                             } else {
-                                file_buf = file_buf url "\n" 
+                                file_buf = file_buf url "\n" # 2nd URL (if available) for the same #EXTINF
                             }
                             count++
                         }
