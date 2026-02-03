@@ -554,12 +554,13 @@ jobs:
                   } 
     
                   # deduplication
-                  /^#EXTINF/ { found_stream=1 } # found_stream: 1 when the first #EXTINF line in the input playlist is found
+                  /^#EXTINF/ { 
+                    found_stream=1; # found_stream: 1 when the first #EXTINF line in the input playlist is found
+                    tag_buf = $0 "\n" # resets buffer to ONLY the current header
+                  }
                   {
                     if (found_stream == 0) next; # discard all lines before first #EXTINF is found, process everything thereon
-                    if (/^#/) {
-                        tag_buf = tag_buf $0 "\n" # buffer metadata lines
-                    } else if (/^(http|https):\/\//) {
+                    if (/^(http|https):\/\//) {
                         url = $0 # deduplicate URLs using the group tracker         
                         if (!seen[url]) { # deduplication: internal memory check
                             print url >> tracker # update disk tracker
