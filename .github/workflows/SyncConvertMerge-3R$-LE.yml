@@ -565,10 +565,10 @@ jobs:
                             print url >> tracker # update disk tracker
                             seen[url] = 1 # update memory array    
                             if (tag_buf != "") { 
-                                file_buf = file_buf tag_buf url "\n" # only prepends the EXTINF metadata if it's the first URL for this EXTINF
-                                tag_buf = "" # resets the metadata buffer so that the 2nd URL (if available) for the same EXTINF doesnt print the EXTINF metadata again
+                                file_buf = file_buf tag_buf url "\n" # only prepends the EXTINF metadata if it's the first stream for this EXTINF
+                                tag_buf = "" # resets the metadata buffer so that the 2nd stream (if available) for the same EXTINF doesnt print the EXTINF metadata again
                             } else {
-                                file_buf = file_buf url "\n" # 2nd URL (if available) for the same EXTINF
+                                file_buf = file_buf url "\n" # 2nd stream (if available) for the same EXTINF
                             }
                             count++
                         }
