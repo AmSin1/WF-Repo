@@ -64,7 +64,7 @@ jobs:
           LIST=$(cat <<EOF # defines the list of playlists and jsons to process in a pipe-separated array (URL|DIR|FILE)
           ${{ env.SOURCE_slle1_URL }}|sl-le/m3u|sl-le-1.m3u
           ${{ env.SOURCE_slle2_URL }}|sl-le/m3u|sl-le-2.m3u
-          ${{ env.SOURCE_slle2j_URL }}|sl-le/json|sl-le-2.json      
+          ${{ env.SOURCE_slle2j_URL }}|sl-le/json|sl-le-2.json
           ${{ env.SOURCE_slle3_URL }}|sl-le/m3u|sl-le-3.m3u
           ${{ env.SOURCE_slle4j_URL }}|sl-le/json|sl-le-4.json
           ${{ env.SOURCE_fcle1_URL }}|fc-le/m3u|fc-le-1.m3u
