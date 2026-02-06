@@ -562,27 +562,36 @@ jobs:
                     }
                     srand(s) # random mumber generator (for use in randomizing dummy ip address in printf later)
                   } 
+
+                  # gate
+                  { if (found_stream == 0 && !/^#EXTINF/) next } # discard all lines before first #EXTINF is found, process everything thereon
     
-                  # deduplication
+                  # start of a stream block
                   /^#EXTINF/ { 
                     found_stream=1; # found_stream: 1 when the first #EXTINF line in the input playlist is found
                     tag_buf = $0 "\n" # resets buffer to ONLY the current header
+                    next
                   }
-                  {
-                    if (found_stream == 0) next; # discard all lines before first #EXTINF is found, process everything thereon
-                    if (/^(http|https):\/\//) {
-                        url = $0 # deduplicate URLs using the group tracker         
-                        if (!seen[url]) { # deduplication: internal memory check
-                            print url >> tracker # update disk tracker
-                            seen[url] = 1 # update memory array    
-                            if (tag_buf != "") { 
-                                file_buf = file_buf tag_buf url "\n" # only prepends the EXTINF metadata if it is the 1st URL for this EXTINF
-                                tag_buf = "" # resets the metadata buffer so that the 2nd URL (if available) for the same EXTINF doesnt prepend the EXTINF metadata again
-                            } else {
-                                file_buf = file_buf url "\n" # 2nd URL (if available) for the same EXTINF
-                            }
-                            count++
+
+                  # collect all #-metadata lines for each stream
+                  /^#/ {
+                    tag_buf = tag_buf $0 "\n"
+                    next
+                  }
+
+                  # deduplication
+                  /^(http|https):\/\// {
+                    url = $0 
+                    if (!seen[url]) { # deduplicate URLs using the group tracker
+                        print url >> tracker # update disk tracker
+                        seen[url] = 1 # update memory array 
+                        if (tag_buf != "") { 
+                            file_buf = file_buf tag_buf url "\n" # only prepends the EXTINF metadata if it is the 1st URL for this EXTINF
+                            tag_buf = "" # resets the metadata buffer so that the 2nd URL (if available) for the same EXTINF doesnt prepend the EXTINF metadata again
+                        } else {
+                            file_buf = file_buf url "\n" # 2nd URL (if available) for the same EXTINF
                         }
+                        count++
                     }
                   }
 
