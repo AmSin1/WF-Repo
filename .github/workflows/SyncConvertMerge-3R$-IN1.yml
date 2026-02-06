@@ -31,7 +31,7 @@ jobs:
       - name: Validate and Load JSON Config from Repo Secrets
         shell: bash
         env:
-          CONFIG_JSON: ${{ secrets.ENV_DOWNLOAD_LE }}
+          CONFIG_JSON: ${{ secrets.ENV_DOWNLOAD_IN1 }}
         run: |
           # Step 1: Validate JSON syntax
           if ! echo "$CONFIG_JSON" | jq empty; then
@@ -62,22 +62,25 @@ jobs:
         run: |
           # Step 1: Define the playlist array
           LIST=$(cat <<EOF # defines the list of playlists and jsons to process in a pipe-separated array (URL|DIR|FILE)
-          ${{ env.SOURCE_slle1_URL }}|sl-le/m3u|sl-le-1.m3u
-          ${{ env.SOURCE_slle1j_URL }}|sl-le/json|sl-le-1.json
-          ${{ env.SOURCE_slle2_URL }}|sl-le/m3u|sl-le-2.m3u
-          ${{ env.SOURCE_slle2j_URL }}|sl-le/json|sl-le-2.json
-          ${{ env.SOURCE_slle3_URL }}|sl-le/m3u|sl-le-3.m3u
-          ${{ env.SOURCE_slle3j_URL }}|sl-le/json|sl-le-3.json
-          ${{ env.SOURCE_slle4j_URL }}|sl-le/json|sl-le-4.json
-          ${{ env.SOURCE_fcle1_URL }}|fc-le/m3u|fc-le-1.m3u
-          ${{ env.SOURCE_fcle1j_URL }}|fc-le/json|fc-le-1.json
-          ${{ env.SOURCE_fcle2_URL }}|fc-le/m3u|fc-le-2.m3u
-          ${{ env.SOURCE_fcle2j_URL }}|fc-le/json|fc-le-2.json
-          ${{ env.SOURCE_fcle3_URL }}|fc-le/m3u|fc-le-3.m3u
-          ${{ env.SOURCE_fcle3j_URL }}|fc-le/json|fc-le-3.json
-          ${{ env.SOURCE_fcle4j_URL }}|fc-le/json|fc-le-4.json
-          ${{ env.SOURCE_wlle1_URL }}|wl-le/m3u|wl-le-1.m3u
-          ${{ env.SOURCE_wlle1j_URL }}|wl-le/json|wl-le-1.json
+          ${{ env.SOURCE_js1_URL }}|js/m3u|js-1.m3u
+          ${{ env.SOURCE_js2_URL }}|js/m3u|js-2.m3u
+          ${{ env.SOURCE_js3_URL }}|js/m3u|js-3.m3u
+          ${{ env.SOURCE_sl1_URL }}|sl/m3u|sl-1.m3u
+          ${{ env.SOURCE_sl2_URL }}|sl/m3u|sl-2.m3u
+          ${{ env.SOURCE_sl3_URL }}|sl/m3u|sl-3.m3u
+          ${{ env.SOURCE_sl3j_URL }}|sl/json|sl-3.json
+          ${{ env.SOURCE_sl4_URL }}|sl/m3u|sl-4.m3u
+          ${{ env.SOURCE_sl5_URL }}|sl/m3u|sl-5.m3u
+          ${{ env.SOURCE_sl6_URL }}|sl/m3u|sl-6.m3u
+          ${{ env.SOURCE_sl7_URL }}|sl/m3u|sl-7.m3u
+          ${{ env.SOURCE_jtv1_URL }}|jtv/m3u|jtv-1.m3u
+          ${{ env.SOURCE_jtv2_URL }}|jtv/m3u|jtv-2.m3u
+          ${{ env.SOURCE_jtv3_URL }}|jtv/m3u|jtv-3.m3u
+          ${{ env.SOURCE_jtv4_URL }}|jtv/m3u|jtv-4.m3u
+          ${{ env.SOURCE_jtv5_URL }}|jtv/m3u|jtv-5.m3u
+          ${{ env.SOURCE_jtv6_URL }}|jtv/m3u|jtv-6.m3u
+          ${{ env.SOURCE_jtv7_URL }}|jtv/m3u|jtv-7.m3u
+          ${{ env.SOURCE_jtv8_URL }}|jtv/m3u|jtv-8.m3u
           EOF
           )
 
@@ -241,7 +244,7 @@ jobs:
       - name: Validate and Load JSON Config from Repo Secrets
         shell: bash
         env:
-          CONFIG_JSON: ${{ secrets.ENV_CONVERT_LE }}
+          CONFIG_JSON: ${{ secrets.ENV_CONVERT_IN1 }}
         run: |
           # Step 1: Validate JSON syntax
           if ! echo "$CONFIG_JSON" | jq empty; then
@@ -399,7 +402,7 @@ jobs:
       - name: Validate and Load JSON Config from Repo Secrets
         shell: bash
         env:
-          CONFIG_JSON: ${{ secrets.ENV_MERGE_LE }}
+          CONFIG_JSON: ${{ secrets.ENV_MERGE_IN1 }}
         run: |
           # Step 1: Validate JSON syntax
           if ! echo "$CONFIG_JSON" | jq empty; then
