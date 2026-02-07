@@ -81,6 +81,10 @@ jobs:
           ${{ env.SOURCE_jtv6_URL }}|jtv/m3u|jtv-6.m3u
           ${{ env.SOURCE_jtv7_URL }}|jtv/m3u|jtv-7.m3u
           ${{ env.SOURCE_jtv8_URL }}|jtv/m3u|jtv-8.m3u
+          ${{ env.SOURCE_chd1_URL }}|chd/m3u|chd-1.m3u
+          ${{ env.SOURCE_chd1j_URL }}|chd/json|chd-1.json
+          ${{ env.SOURCE_chd2_URL }}|chd/m3u|chd-2.m3u
+          ${{ env.SOURCE_chd3_URL }}|chd/m3u|chd-3.m3u         
           EOF
           )
 
